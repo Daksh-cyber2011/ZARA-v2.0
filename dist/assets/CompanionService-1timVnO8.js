@@ -1,0 +1,1 @@
+import{i,r as t}from"./index-BMCpxOqB.js";const a=t("ZaraActions"),c={async apply(r){if(!i())return!1;try{return!!(r?await a.startCompanionService():await a.stopCompanionService()).ok}catch{return!1}}};export{c as ZaraActionsLifecycle};
