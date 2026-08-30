@@ -64,6 +64,9 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
     <div className="onboard">
       <div className="onboard-card">
         <h1>ZARA</h1>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.4em", color: "var(--text-faint)", marginBottom: 14 }}>
+          SET UP ZARA — SECURE CORE
+        </div>
         <div className="sub">
           Your persistent AI companion. To think and speak, ZARA needs a brain —
           bring your own API key. It is stored only on this device and never sent anywhere else.

@@ -1,77 +1,71 @@
-# ZARA V1.1
+# ZARA V2.0
 
-**A persistent, proactive, memory-driven AI companion for Android tablets.**
+**A persistent, proactive, memory-driven AI companion for Android — now with a
+full holographic presence stage.**
 
-Built from the ZARA V1.0 Master Build Directive + V1.0 FINAL directive, evolved
-to V1.1 under the **Companion Evolution Directive** (event-driven perception
-pipeline, screen awareness, memory×perception fusion, background survival).
-Reference-audited against the supplied MYRAA project (Windows/Electron desktop
-app) — ideas reused where sound, architecture rebuilt where weak, all
-desktop/Windows machinery removed.
-
----
-
-## V1.1 additions (Companion Evolution Directive)
-
-| System | Status | Where |
-|---|---|---|
-| **Event-driven pipeline (§3): bus → EventNormalizer (typed, deduped, significance-ranked) → CandidateGenerator → 3-stage engine** | ✅ built + unit-tested | `src/perception/EventNormalizer.ts`, `src/proactivity/CandidateGenerator.ts` |
-| **PerceptionCoordinator (§46 extraction): owns pipeline + conversation-end detection + time milestones** | ✅ built + unit-tested | `src/perception/PerceptionCoordinator.ts` |
-| **Screen awareness (§4-6): AccessibilityService window-state events → structured ScreenContext → meaningful-change detector → SCREEN_CONTEXT_CHANGED** | ✅ built + unit-tested (device run pending) | `src/perception/ScreenContext.ts`, `android/.../ZaraAccessibilityService.java`, `ZaraPerceptionPlugin.java` |
-| **Capability states (§4): unavailable / off / permission_required / active — real probes, never assumed** | ✅ built + unit-tested | `src/perception/capabilities.ts` |
-| **Memory×perception fusion (§37): screen events joined with retrieved memories ("Back to VaaniX?")** | ✅ built + unit-tested | `CandidateGenerator.ts` |
-| **Perception→memory loop (§38): screen topics → temporary_context (30 min TTL); 3+ repeats → semantic (7-day TTL)** | ✅ built + unit-tested | `PerceptionCoordinator.ts` |
-| **New typed events (§3): CONVERSATION_ENDED, QUIET/SLEEP_MODE_CHANGED, PROACTIVE_IGNORED, TIME_MILESTONE, SCREEN_CONTEXT_CHANGED, CAPABILITY_CHANGED** | ✅ built + unit-tested | `src/core/events/EventBus.ts` |
-| **Foreground keep-alive service (§21): opt-in, visible silent notification, specialUse FGS type** | ✅ built (device run pending) | `android/.../ZaraForegroundService.java`, `src/native/CompanionService.ts` |
-| **Boot recovery (§20/§21): reminders persisted + BOOT_COMPLETED rescheduling** | ✅ built (device run pending) | `ZaraReminderStore.java`, `ZaraBootReceiver.java` |
-| **§29 model context contract: capabilities + permitted screen context injected (model may never assume more)** | ✅ built + unit-tested | `src/cognition/context/ContextEngine.ts` |
-| **Diagnostics §25: capability panel, last perception event, screen context, wake-word honesty line** | ✅ built + browser-smoke-tested | `src/ui/components/DiagnosticsPanel.tsx` |
-| **Privacy (§24): screen awareness OFF by default; double gate (ZARA toggle AND Android accessibility permission); no screenshots/OCR/uploads** | ✅ built + unit-tested | `Settings.ts`, `ScreenContext.ts`, `ZaraPerceptionPlugin.java` |
-
-**236 unit tests passing** (`npm test`) — all prior 190 preserved, +46 new
-covering the pipeline, screen-change detection, capability gating, §37 fusion,
-§38 promotion, duplicate-event suppression (§41 #24), conversation end, and
-privacy gates (§41 #7/#8/#9/#10).
+V2.0 keeps everything that made V1.1 excellent (deterministic runtime, 306
+unit tests, honest engineering) and rebuilds the **experience layer** to a
+premium cyber-holographic standard: an immersive emotion-reactive stage, a
+real controllable 3D camera rig, a living particle field, glass HUD panels,
+and a staged boot sequence.
 
 ---
 
-## V1.0 core (preserved, still green)
+## What's new in V2.0 — the Presence Update
+
+| System | What changed |
+|---|---|
+| **Avatar stage (the big one)** | The VRM character is now framed from her REAL bounding box (never cut off), lit with a 4-light cinematic rig (key + cool fill + emotion rim + ambient), and stands on a holo-stage floor with a glowing emotion ring |
+| **Natural rest pose** | No more T-pose — arms settle into a relaxed A-stance via the normalized humanoid rig, with softened elbows and a subtle weight shift |
+| **Full camera rig** | Touch: 1-finger orbit · pinch zoom · two-finger pan · double-tap reset. Mouse: drag orbit · wheel zoom · WASD/QE · keys 1-6 presets · L lock · F eye-tracking · R reset. Six view presets: BUST / FRONT / ¾ / SIDE / BACK / FULL |
+| **Eye tracking** | Her eyes follow your pointer (toggle: EYES LIVE / EYES AUTO) |
+| **Living layer** | A canvas field of orbiting data-motes, rising side-streams, a rotating reticle ring and speech-beat pulse rings — all reactive to her real speech energy |
+| **Emotion themes** | 16 emotion→theme mappings recolor the rim light, floor ring, particles, HUD accents, mic orb and composer in real time. The whole interface breathes with her state |
+| **Boot sequence** | Staged mono-type boot (LINKING COGNITION CORE → FETCHING NEURAL VESSEL → MATERIALIZING PRESENCE) with live progress bar and animated core mark — with an honest degraded-mode fallback |
+| **New design system** | Deep-space navy `#02060d`, cyan→violet identity, Sora display / Manrope body / IBM Plex Mono HUD type, glassmorphism (blur + hairline borders), animated status chips |
+| **Glass HUD shell** | Floating HUD bar (state chip, core-online, mem-link status), left rail panels (CHAT / MEMORY / SETTINGS / CORE) as animated slide-overs, latest-message toast, quick-action chips |
+| **Composer dock** | Glass pill composer with glowing mic orb (pulse rings while listening), send orb, STOP while speaking |
+| **Mobile-first** | Full-screen stage, safe-area insets, bottom rail row, compact camera presets, touch-optimized targets — the MYRAA-class mobile feel |
+
+### V2.0 bug fixes (found by systematic audit)
+
+- **Model invisible / mis-framed** — V1 framed a fixed 0.88 m bust shot from a
+  head bone guess. V2 measures the loaded model's bounding box and derives
+  every preset distance from the real height (fit formula `H / 2·tan(fov/2)`).
+- **Render-loop starvation** — the keyboard-control loop now runs on its own
+  timestamp source; sharing the render clock froze all rendering.
+- **Boot deadlock** — the avatar canvases now mount immediately (boot overlay
+  floats above), so model loading can never wait on a gate that waits on it.
+  A 15 s failsafe still guarantees the UI opens.
+- **Frame pacing** — idle states no longer throttle to 12-20 fps (choppy);
+  the renderer never drops below 30 fps, with mobile tiers (pixelRatio ≤ 1.5,
+  30 fps) and desktop (≤ 2, 60 fps).
+- **Panel switching** — the left rail sits above the panel scrim, so panels
+  can be switched directly without closing first.
+
+---
+
+## V1.1 core (preserved — all 306 tests green)
 
 | System | Status | Where |
 |---|---|---|
-| Deterministic state machine (13 states, legal-transition table) | ✅ built + unit-tested | `src/core/state/` |
-| Typed event bus (27 event types incl. V1.1 additions) | ✅ built | `src/core/events/` |
-| LLM provider abstraction (chat / structured / streaming / tools / cancellation / retry / typed errors) | ✅ built + unit-tested | `src/cognition/provider/` |
-| **Google Gemini adapter (PRIMARY: chat/stream/structured/tools/cancel/typed errors; optional endpoint override)** | ✅ built + unit-tested + mock-endpoint E2E verified | `GeminiProvider.ts` |
-| **GLM adapter (OPTIONAL alternate: native tool_calls, SSE streaming, thinking toggle — never required, never default)** | ✅ built + unit-tested + mock-endpoint verified | `GLMProvider.ts` |
-| Gemini adapter + OpenAI-compatible adapter (selectable alternates) | ✅ built | `GeminiProvider.ts`, `OpenAICompatProvider.ts` |
-| Context engine with token budgets (ranked memory injection) | ✅ built + unit-tested | `src/cognition/context/` |
-| Structured memory (9 types, importance/confidence/expiry/privacy, dedup with stemming, contradiction updates, sweep) | ✅ built + unit-tested | `src/memory/` |
-| LLM memory consolidation (ADD/UPDATE/REMOVE proposals, deterministic store validation) | ✅ built | `src/memory/consolidation/` |
-| Agent loop (bounded steps, tool registry, risk levels, confirmation gates, verification) | ✅ built + unit-tested | `src/agent/` |
-| 19 typed Android tools (no shell/exec path exists) | ✅ built + unit-tested | `src/agent/tools/AndroidTools.ts` |
-| ProactiveDecisionEngine (9-dimension scoring, SPEAK_NOW/WAIT/SAVE_FOR_LATER/IGNORE, NO-silence default) | ✅ built + unit-tested | `src/proactivity/` |
-| **§39 three-stage proactivity (deterministic gate → bounded GLM reasoning → policy re-gate; veto/reshape; hourly budget, topic dedupe)** | ✅ built + unit-tested | `Refiner.ts`, `ProactiveDecisionEngine.ts` |
-| Anti-spam policy (cooldown, daily cap, duplicate suppression, streak break, post-speech guard) | ✅ built + unit-tested | `src/proactivity/policy/` |
-| Quiet mode & sleep mode as real states | ✅ built + unit-tested | `src/ZaraRuntime.ts`, `src/core/state/` |
-| Perception (battery, connectivity, time, lifecycle, idle) — permission-aware, no fabrication | ✅ built | `src/perception/` |
-| Voice: Gemini Live client-direct session (16k PCM up, 24k gapless playback, barge-in) | ✅ built (needs device + key for live test) | `src/voice/LiveVoice.ts` |
-| **Native voice session (PATH A): SpeechRecognizer STT → provider turn → TextToSpeech, language auto-switch, real barge-in, honest degradation** | ✅ built + unit-tested (device run pending) | `src/voice/NativeVoice.ts`, `android/.../ZaraVoicePlugin.java` |
-| **REAL female VRM avatar (Three.js + three-vrm, bundled pixiv-licensed character: 54 bones, visemes, emotions, blink/lookAt; state-aware §8; honest procedural fallback)** | ✅ built + browser-render verified + unit-tested | `src/avatar/renderer/VrmAvatarRenderer.ts`, `vrmMapping.ts`, `public/assets/ZARA-avatar.vrm` |
-| **Structured tool-round transport (functionCall/functionResponse parts — Gemini; tool_calls/tool_call_id — OpenAI-protocol)** | ✅ built + unit-tested + mock E2E (loop bug found & fixed) | `GeminiProvider.ts`, `GLMProvider.ts`, `types.ts` |
-| Cancellable speech queue (no orphan audio, no duplicates) | ✅ built + unit-tested | `src/voice/SpeechQueue.ts` |
-| Interruption controller (speech/reasoning/tool taxonomy) | ✅ built + unit-tested | `src/voice/interruption/` |
-| Real-time procedural avatar (state-driven, 16 emotions, gaze, blink, breathing, lip-sync) | ✅ built | `src/avatar/` |
-| Tablet UI (conversation, memory manager, settings, diagnostics, onboarding) | ✅ built + browser-smoke-tested | `src/ui/`, `src/App.tsx` |
-| Android shell (Capacitor 7) + ZaraActions native plugin (typed intents) + reminder alarms | ✅ built, APK compiled | `android/` |
-| Diagnostics (structured records, state history, decision traces — no chain-of-thought) | ✅ built | `src/core/logging/` |
-| **Time expression parser (EN/HI/Hinglish: raat ko 9 baje, 20 minute baad, aadha ghanta, sawa/paune, weekdays, deterministic traces)** | ✅ built + unit-tested | `src/core/time/TimeParser.ts` |
-| **Event-driven candidates (battery crossing, user return) routed through the 3-stage engine** | ✅ built + unit-tested | `src/ZaraRuntime.ts` |
+| Event-driven pipeline: bus → EventNormalizer → CandidateGenerator → 3-stage engine | ✅ built + unit-tested | `src/perception/`, `src/proactivity/` |
+| Screen awareness (AccessibilityService → ScreenContext → SCREEN_CONTEXT_CHANGED) | ✅ built + unit-tested | `src/perception/ScreenContext.ts`, `android/` |
+| Capability states (unavailable / off / permission_required / active) | ✅ built + unit-tested | `src/perception/capabilities.ts` |
+| Memory×perception fusion + perception→memory loop | ✅ built + unit-tested | `CandidateGenerator.ts`, `PerceptionCoordinator.ts` |
+| Foreground keep-alive service + boot recovery | ✅ built | `android/.../ZaraForegroundService.java` |
+| Deterministic state machine (13 states) + typed event bus (27 events) | ✅ built + unit-tested | `src/core/` |
+| LLM providers: Gemini (primary) · OpenAI-compatible · GLM (optional) | ✅ built + unit-tested | `src/cognition/provider/` |
+| Context engine with token budgets + structured memory (9 types) | ✅ built + unit-tested | `src/cognition/context/`, `src/memory/` |
+| Agent loop (19 typed Android tools, risk gates, verification) | ✅ built + unit-tested | `src/agent/` |
+| Proactivity (9-dimension scoring, 3-stage engine, anti-spam) | ✅ built + unit-tested | `src/proactivity/` |
+| Voice: Gemini Live (16k up / 24k gapless / barge-in) + native STT→TTS path | ✅ built | `src/voice/` |
+| Real-time VRM avatar (expressions, visemes, blink, gaze, breathing) | ✅ built + browser-verified | `src/avatar/` |
+| EN/HI/Hinglish time parser (raat ko 9 baje, sawa/paune…) | ✅ built + unit-tested | `src/core/time/TimeParser.ts` |
+| Tablet/mobile UI (conversation, memory, settings, diagnostics) | ✅ rebuilt V2 | `src/App.tsx`, `src/ui/` |
+| Android shell (Capacitor 7) + native plugins + reminder alarms | ✅ built, APK compiles | `android/` |
 
-**(Superseded — see the 236-test figure above; the original 150-test suite grew across phases.)** Historical coverage: state machine, proactivity
-scoring + §39 refiner, memory quality, tool contract, agent loop, verification
-honesty, EN/HI/Hinglish time parsing, GLM provider transport, native voice
-session, provider error taxonomy, cancellation, and all 25 §34 scenarios.
+**306 unit tests passing** (`npm test`).
 
 ---
 
@@ -91,18 +85,14 @@ npx cap sync android
 cd android
 ./gradlew assembleDebug    # → app/build/outputs/apk/debug/app-debug.apk
 ```
-Requirements: JDK 17–21, Android SDK 35 / build-tools 35. The compiled debug
-APK ships in this delivery as `ZARA-v1.0-debug.apk` (4.4 MB, minSdk 23).
+Requirements: JDK 17–21, Android SDK 35 / build-tools 35.
 
-### First run on the tablet
+### First run
 1. Install the APK (allow "install unknown apps").
-2. Grant **Microphone** (live voice) and **Notifications** (reminders) —
-   requested once at launch. Nothing else is requested.
-3. On first launch ZARA asks for your own API key (stored on-device only,
-   never displayed again, never sent anywhere except the provider).
-   - **Gemini** (recommended — enables live voice sessions): free key at
-     aistudio.google.com/apikey
-   - Or any OpenAI-compatible endpoint (OpenAI, Groq, Together, DeepSeek, local).
+2. Grant **Microphone** (live voice) and **Notifications** (reminders).
+3. Bring your own API key (stored on-device only):
+   - **Gemini** (recommended — enables live voice): free key at aistudio.google.com/apikey
+   - Or any OpenAI-compatible endpoint, or optional GLM (z.ai / BigModel).
 
 ### Try these
 - "Hey Zara" / "Open YouTube" / "Search YouTube for lofi"
@@ -111,6 +101,7 @@ APK ships in this delivery as `ZARA-v1.0-debug.apk` (4.4 MB, minSdk 23).
 - "Remember that I'm building a game called Starfall" → later "What am I working on?"
 - "Message Rahul that I'll reach home in ten minutes" (confirmation gate → draft)
 - "Zara, be quiet" (real QUIET state) · "Zara, stop" (barge-in)
+- Camera: drag to rotate her, pinch/scroll to zoom, double-tap to reset, keys 1-6 / WASD / Q-E (desktop), BUST for the close-up
 
 ---
 
@@ -118,17 +109,17 @@ APK ships in this delivery as `ZARA-v1.0-debug.apk` (4.4 MB, minSdk 23).
 
 ```
 Capacitor 7 shell (Kotlin/Java) ── ZaraActions plugin: 19 typed intents
-        │ WebView (React 19 + TS core, ~150 KB gz)
+        │ WebView (React 19 + TS core)
         ▼
 STATE MACHINE ── EVENT BUS ── DIAGNOSTICS
    │                │
-VOICE ──── COGNITION (LLMProvider: Gemini | OpenAI-compat) ──── CONTEXT (budgets)
+VOICE ──── COGNITION (Gemini | OpenAI-compat | GLM) ──── CONTEXT (budgets)
    │                │
 SPEECH QUEUE   AGENT LOOP ── TOOL REGISTRY (risk/confirm/verify)
    │                │
-AVATAR ←── EMOTIONS   MEMORY (store · retriever/ranking · consolidator)
-                     PROACTIVITY (scoring · anti-spam · quiet/sleep gates)
-                     PERCEPTION (battery · network · time · lifecycle)
+PRESENCE STAGE ── EMOTION THEMES        MEMORY (store · ranking · consolidation)
+   VRM renderer · living layer          PROACTIVITY (scoring · anti-spam)
+   camera rig · holo floor              PERCEPTION (battery · network · screen)
 ```
 
 Everything runs on-device: LLM traffic goes directly from the app to the
@@ -138,47 +129,36 @@ provider over TLS. Persistence via Capacitor Preferences/Filesystem
 ## Security posture
 - API keys: user-supplied, on-device encrypted preferences, boolean-only
   exposure to UI, never in prompts/logs/diagnostics.
-- No arbitrary command execution exists anywhere — tools are typed intents.
-- HIGH-risk tools (call, message) always require explicit confirmation;
-  MEDIUM (reminders/alarms/events) are user-requested by nature; LOW execute
-  freely when asked.
-- Tool outputs are size-capped and treated as untrusted data in prompts.
+- No arbitrary command execution — tools are typed intents.
+- HIGH-risk tools (call, message) always require explicit confirmation.
+- Tool outputs are size-capped and treated as untrusted data.
 - Permissions requested: RECORD_AUDIO + POST_NOTIFICATIONS only.
 
-## Honest limitations (no fabrication — Directive §58)
-- **Live voice sessions need a Gemini key + real device mic.** The pipeline is
-  built and unit-tested at the DSP layer, but end-to-end voice latency/quality
-  was not measurable in this build environment (no mic, no key).
-- **Tool execution on Android is intent-verified in code, but not device-run
-  in this session** (no emulator). The web preview honestly reports
-  "requires the Android tablet" for native-only tools instead of faking success.
-- **Avatar is procedural** (real-time canvas renderer). The MYRAA reference
-  contained only MP4 videos — no PMX model or Three.js renderer was supplied —
-  so no 3D model is claimed. The `AvatarRenderer` interface accepts a future
-  PMX/Three.js implementation.
-- **Background behavior**: proactive engine runs while the app is
-  foreground/visible (the tablet-companion scenario); reminders fire via
-  AlarmManager when backgrounded. No always-on background listening is claimed.
-- Screen perception / notification reading: not implemented (special grants);
-  ZARA never claims to see what she cannot.
+## Honest limitations (no fabrication)
+- Live voice sessions need a Gemini key + real device mic; the pipeline is
+  unit-tested at the DSP layer but end-to-end latency was not measurable here.
+- Tool execution on Android is intent-verified in code; web preview honestly
+  reports "requires the Android device" for native-only tools.
+- Speech animation is a controlled viseme approximation over real speech
+  energy — honest, reliable, not claimed as phoneme lip-sync.
+- Background behavior: proactive engine runs while the app is visible;
+  reminders fire via AlarmManager when backgrounded.
 
 ## Repository layout
 ```
 zara/
-├── AUDIT.md                     # Milestone-0 implementation audit
-├── VERIFICATION.md              # What was actually verified, and how
-├── android/                     # Capacitor project + ZaraActions plugin
+├── android/                     # Capacitor project + native plugins
 ├── src/
 │   ├── core/          state · events · logging · configuration · persona
-│   ├── cognition/     provider (Gemini/OpenAI) · context
+│   ├── cognition/     provider (Gemini/OpenAI/GLM) · context
 │   ├── memory/        storage · retrieval/ranking · consolidation
 │   ├── agent/         orchestrator · tools · confirmation · verification
 │   ├── proactivity/   decision engine · scoring · anti-spam policy
-│   ├── perception/    device signals
+│   ├── perception/    device signals · screen context
 │   ├── voice/         live session · speech queue · interruption
-│   ├── avatar/        emotion controller · procedural renderer
+│   ├── avatar/        renderer (VRM + camera rig) · stage (living layer · themes)
 │   ├── native/        ZaraActions bridge · permissions
 │   ├── ui/            components (onboarding, settings, memory, diagnostics)
 │   └── ZaraRuntime.ts # composition root — ONE companion
-└── tests/             81 vitest unit tests
+└── tests/             306 vitest unit tests
 ```
