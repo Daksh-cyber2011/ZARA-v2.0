@@ -109,7 +109,7 @@ describe("ProactiveRefiner (§39 stage 2)", () => {
 });
 
 describe("ProactiveDecisionEngine.evaluateWithModel (§39 stages 1→2→3)", () => {
-  it("model VETO turns a would-be SPEAK_NOW into IGNORE, explainably", async () => {
+  it("model VETO turns a would-be SPEAK_NOW into SILENCE, explainably", async () => {
     const provider = new FakeProvider({ speak: false, line: "", reason: "user is busy" });
     const { engine } = makeEngine(provider);
     const scored = await engine.evaluateWithModel(
@@ -117,7 +117,7 @@ describe("ProactiveDecisionEngine.evaluateWithModel (§39 stages 1→2→3)", ()
       CTX,
       { memoryLines: [], contextLine: "" }
     );
-    expect(scored.decision).toBe("IGNORE");
+    expect(scored.decision).toBe("SILENCE");
     expect(scored.reason).toContain("model veto");
     expect(scored.reason).toContain("user is busy");
   });
@@ -159,7 +159,7 @@ describe("ProactiveDecisionEngine.evaluateWithModel (§39 stages 1→2→3)", ()
     const { engine } = makeEngine(provider);
     const weak = { ...STRONG, id: "c5", createdAt: Date.now(), relevance: 0.1, importance: 0.1, personalContext: 0.1, timeliness: 0.1, novelty: 0.1, confidence: 0.1 };
     const scored = await engine.evaluateWithModel(weak, CTX);
-    expect(scored.decision).toBe("IGNORE");
+    expect(scored.decision).toBe("SILENCE");
     expect(structured).not.toHaveBeenCalled(); // stage 2 skipped
   });
 });

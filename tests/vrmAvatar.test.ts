@@ -192,3 +192,24 @@ describe("§35 — adaptive frame-rate policy (idle renderer economy)", () => {
     expect(frameIntervalFor("IDLE")).toBeLessThan(frameIntervalFor("SLEEPING"));
   });
 });
+
+describe("§24 — bounded VRM loading", () => {
+  it("a stalled load rejects at the deadline instead of hanging forever", async () => {
+    const { raceWithDeadline } = await import("../src/avatar/renderer/VrmAvatarRenderer");
+    const never = new Promise<never>(() => {}); // pathological stalled fetch
+    await expect(raceWithDeadline(never, 30, "VRM asset load")).rejects.toThrow(/timed out after 30ms/);
+  });
+
+  it("a fast load resolves normally with its value", async () => {
+    const { raceWithDeadline } = await import("../src/avatar/renderer/VrmAvatarRenderer");
+    const v = await raceWithDeadline(Promise.resolve("model"), 1000, "VRM asset load");
+    expect(v).toBe("model");
+  });
+
+  it("a load failing before the deadline propagates the original error", async () => {
+    const { raceWithDeadline } = await import("../src/avatar/renderer/VrmAvatarRenderer");
+    await expect(
+      raceWithDeadline(Promise.reject(new Error("404 not found")), 1000, "VRM asset load")
+    ).rejects.toThrow("404 not found");
+  });
+});

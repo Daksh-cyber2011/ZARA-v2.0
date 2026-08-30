@@ -101,6 +101,10 @@ export type ProactiveDecision =
   | "SPEAK_NOW"
   | "WAIT"
   | "SAVE_FOR_LATER"
+  /** §8: deliberate choice to stay silent (quiet/sleep/threshold/model veto).
+   * Valid and common — silence is a feature, and it is observable (§40). */
+  | "SILENCE"
+  /** Candidate discarded as irrelevant / duplicate / feature-disabled. */
   | "IGNORE";
 
 export interface ScoredCandidate {

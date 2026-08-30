@@ -1,10 +1,11 @@
 /**
- * ZARA V1.0 — Proactive Decision Engine (Directive §4-6, §39-40).
+ * ZARA V1.0 — Proactive Decision Engine (Directive §4-6, §8-9, §39-40).
  *
  * THE defining feature. Every candidate observation is scored across nine
- * dimensions; the engine decides SPEAK_NOW / WAIT / SAVE_FOR_LATER / IGNORE.
- * NO_ACTION-equivalent (IGNORE) is the default outcome — silence must be
- * the norm, not the exception. Quiet/sleep states are hard gates.
+ * dimensions; the engine decides SPEAK_NOW / WAIT / SAVE_FOR_LATER / SILENCE / IGNORE.
+ * SILENCE (§8: valid, common, deliberate — quiet/sleep/threshold/model veto)
+ * is distinct from IGNORE (candidate discarded as irrelevant/duplicate/off).
+ * Silence must be the norm, not the exception. Quiet/sleep states are hard gates.
  */
 import { ProactiveCandidate, ProactiveDecision, ScoredCandidate, SOURCE_CATEGORY } from "./types";
 import { AntiSpamPolicy } from "./policy/AntiSpam";
@@ -87,8 +88,9 @@ export class ProactiveDecisionEngine {
     }
 
     if (!verdict.speak) {
-      // Model veto — logged, explainable, final. No commit: nothing is spoken.
-      return this.finish(c, "IGNORE", stage1.score, `model veto: ${verdict.reason || "not worth saying"}`);
+      // Model veto → deliberate SILENCE (§8): logged, explainable, final.
+      // No commit: nothing is spoken.
+      return this.finish(c, "SILENCE", stage1.score, `model veto: ${verdict.reason || "not worth saying"}`);
     }
 
     // Reshape: model line replaces the template; dedupe + policy re-gate.
@@ -117,11 +119,13 @@ export class ProactiveDecisionEngine {
 
   private evaluateInternal(c: ProactiveCandidate, ctx: EngineContext, now: number, commit: boolean): ScoredCandidate {
     // ---- Hard gates (§7, §8, §9): quiet/sleep/busy states ----
+    // §8: quiet/sleep produce an explicit SILENCE outcome — a deliberate,
+    // observable choice to stay silent (§40 "why did ZARA remain silent?").
     if (ctx.quietMode) {
-      return this.finish(c, "IGNORE", 0, "quiet mode active (user asked for silence)");
+      return this.finish(c, "SILENCE", 0, "quiet mode active (user asked for silence)");
     }
     if (ctx.sleepMode) {
-      return this.finish(c, "IGNORE", 0, "sleep mode active");
+      return this.finish(c, "SILENCE", 0, "sleep mode active");
     }
     if (!this.settings().proactivityEnabled) {
       return this.finish(c, "IGNORE", 0, "proactivity disabled in settings");
@@ -178,7 +182,7 @@ export class ProactiveDecisionEngine {
       decision = "SAVE_FOR_LATER";
       reason = `score ${score.toFixed(2)} below threshold but ${c.timeliness >= 0.5 ? "time-sensitive" : "important"} — saved`;
     } else {
-      decision = "IGNORE";
+      decision = "SILENCE";
       reason = `score ${score.toFixed(2)} below threshold ${threshold.toFixed(2)} — silence`;
     }
 

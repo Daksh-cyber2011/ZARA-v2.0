@@ -12,6 +12,7 @@
 import { StateMachine } from "./core/state/StateMachine";
 import { eventBus, EventBus } from "./core/events/EventBus";
 import { diagnostics, Diagnostics } from "./core/logging/Diagnostics";
+import { BootTracker } from "./core/logging/BootTracker";
 import { settingsStore, secretStore, ZaraSettings, KVStorage } from "./core/configuration/Settings";
 import { persistConversation, restoreConversation, clearConversation } from "./cognition/context/ConversationPersistence";
 import { buildSystemPrompt } from "./core/configuration/Persona";
@@ -58,6 +59,13 @@ export interface ZaraRuntimeOptions {
 /** §37: structured runtime status for the diagnostics panel. */
 export interface RuntimeStatus {
   state: string;
+  /** §18/§19: guarded boot record — what happened during boot, per stage. */
+  boot: {
+    totalMs: number;
+    complete: boolean;
+    degraded: boolean;
+    stages: { id: string; status: string; durationMs: number | null; error: string | null; fallback: string | null }[];
+  };
   lastTransition: { from: string; to: string; reason: string; at: number } | null;
   quiet: boolean;
   sleeping: boolean;
@@ -95,6 +103,8 @@ export class ZaraRuntime {
   readonly sm = new StateMachine("BOOTING");
   readonly bus: EventBus = eventBus;
   readonly diag: Diagnostics = diagnostics;
+  /** §18/§19: every boot stage is timeout-bounded, guarded and observable. */
+  readonly bootTracker = new BootTracker(diagnostics);
   readonly settings: import("./core/configuration/Settings").SettingsStore;
   readonly secrets: import("./core/configuration/Settings").SecretStore;
   readonly emotions = new EmotionController();
@@ -289,60 +299,115 @@ export class ZaraRuntime {
 
   /* ------------------------------ lifecycle ------------------------------- */
 
+  /**
+   * §18 RESILIENT BOOT. Every stage is timeout-bounded and guarded — a
+   * hanging or crashing subsystem degrades that stage and boot CONTINUES.
+   * The UI additionally runs an independent failsafe watchdog (App.tsx),
+   * so "ZARA is waking up…" forever is structurally impossible.
+   * Stage order + status/duration/error/fallback land in diagnostics (§19).
+   */
   async init(): Promise<void> {
-    await this.settings.load();
-    // §11 privacy toggles take effect before anything else starts.
-    this.diag.setEnabled(this.settings.current.diagnosticsEnabled);
-    await this.memory.ensureLoaded();
-    if (this.settings.current.memoryEnabled) {
-      await this.memory.sweepExpired();
-    }
-    await this.perception.start();
+    // --- CORE_INIT: settings + privacy gates. Failure → honest defaults.
+    await this.bootTracker.run("CORE_INIT", async () => {
+      await this.settings.load();
+      this.diag.setEnabled(this.settings.current.diagnosticsEnabled);
+    }, {
+      timeoutMs: 4000,
+      fallback: undefined as void,
+      onFallback: "settings unavailable — running on defaults"
+    });
 
-    // §3 V1.1: start the event-driven pipeline (normalizer + generator +
-    // milestone ticker + conversation-end detection).
-    await this.initScreenAwareness();
-    this.perceptionCoordinator.start();
-
-    // §21 V1.1: opt-in foreground keep-alive service.
-    await this.applyKeepAlive();
-
-    this.providers.invalidate();
-    this.applyProactivitySettings();
-
-    // §34: restore recent conversation continuity (bounded tail, 48 h
-    // freshness). Enables the §39 flow — "What were we working on
-    // yesterday?" — even after a full process restart.
-    const restored = await restoreConversation(this.conversationStorage);
-    if (restored.messages.length > 0) {
-      this.history = restored.messages.slice(-24);
+    // --- STORAGE: §34 conversation continuity restore (bounded).
+    const restored = await this.bootTracker.run(
+      "STORAGE",
+      () => restoreConversation(this.conversationStorage),
+      {
+        timeoutMs: 3000,
+        fallback: { messages: [] as (ChatMessage & { role: "user" | "model" })[], ageMs: 0, expired: false },
+        onFallback: "previous conversation unavailable"
+      }
+    );
+    if (restored.ok && restored.value.messages.length > 0) {
+      this.history = restored.value.messages.slice(-24);
       this.restoredConversation = this.history.filter((m): m is ChatMessage & { role: "user" | "model" } => m.role === "user" || m.role === "model");
       this.diag.log("memory", "SESSION_RESUMED", {
         messages: this.history.length,
-        ageMinutes: Math.round(restored.ageMs / 60000)
+        ageMinutes: Math.round(restored.value.ageMs / 60000)
       });
       this.bus.emit("SESSION_RESUMED", {
         messages: this.restoredConversation.map(m => ({ role: m.role, text: m.text })),
-        ageMs: restored.ageMs
+        ageMs: restored.value.ageMs
       });
-    } else if (restored.expired) {
-      this.diag.log("memory", "SESSION_EXPIRED", { ageMs: restored.ageMs });
+    } else if (restored.ok && restored.value.expired) {
+      this.diag.log("memory", "SESSION_EXPIRED", { ageMs: restored.value.ageMs });
     }
-    // Android device: route ALL speech through the native TTS engine so the
-    // queue reflects real utterance lifecycle (§28). Web keeps speechSynthesis.
-    if (isVoicePluginAvailable()) {
-      const lang = this.settings.current.language === "hi" ? "hi-IN" : "en-IN";
-      this.speech.useNativeTts({
-        speak: (text, l, id) => nativeTtsSpeak(text, l, id).then(r => r.ok),
-        stop: () => { void nativeTtsStop(); }
-      }, lang);
-    }
+
+    // --- MEMORY: load + expiry sweep. Failure → memory degraded, not fatal.
+    await this.bootTracker.run("MEMORY", async () => {
+      await this.memory.ensureLoaded();
+      if (this.settings.current.memoryEnabled) {
+        await this.memory.sweepExpired();
+      }
+    }, {
+      timeoutMs: 4000,
+      fallback: undefined as void,
+      onFallback: "memory unavailable — session continues without persistent memory"
+    });
+
+    // --- PERCEPTION: event pipeline + screen awareness (permission-aware).
+    await this.bootTracker.run("PERCEPTION", async () => {
+      await this.perception.start();
+      await this.initScreenAwareness();
+      this.perceptionCoordinator.start();
+    }, {
+      timeoutMs: 5000,
+      fallback: undefined as void,
+      onFallback: "perception degraded — context continues without device signals"
+    });
+
+    // --- VOICE: native TTS wiring (web keeps speechSynthesis — no-op here).
+    await this.bootTracker.run("VOICE", async () => {
+      if (isVoicePluginAvailable()) {
+        const lang = this.settings.current.language === "hi" ? "hi-IN" : "en-IN";
+        this.speech.useNativeTts({
+          speak: (text, l, id) => nativeTtsSpeak(text, l, id).then(r => r.ok),
+          stop: () => { void nativeTtsStop(); }
+        }, lang);
+      }
+    }, {
+      timeoutMs: 3000,
+      fallback: undefined as void,
+      onFallback: "native TTS unavailable — text + web speech remain usable"
+    });
+
+    // --- OPTIONAL_SERVICES: keep-alive + proactivity settings (§21/§11).
+    await this.bootTracker.run("OPTIONAL_SERVICES", async () => {
+      await this.applyKeepAlive();
+      this.providers.invalidate();
+      this.applyProactivitySettings();
+    }, {
+      timeoutMs: 3000,
+      fallback: undefined as void,
+      onFallback: "optional services deferred"
+    });
+
+    // --- PROVIDER: async probe only — never blocks startup (§18).
+    const providers = await this.bootTracker.run(
+      "PROVIDER",
+      () => this.providers.configuredProviders(),
+      { timeoutMs: 5000, fallback: [] as string[], onFallback: "provider status unknown — check Settings" }
+    );
+
+    // AVATAR stage is marked externally by the UI layer (§18: avatar loading
+    // must NOT block boot) — see setAvatarStatus().
+
     this.diag.log("state", "RUNTIME_READY", {
       provider: this.settings.current.providerId,
-      configured: await this.providers.configuredProviders()
+      configured: providers.value
     });
-    // §20: BOOTING → IDLE — subsystems ready, companion alive.
+    // §20: BOOTING → IDLE — companion alive even if stages degraded.
     this.sm.transition("IDLE", "init complete");
+    this.bootTracker.complete();
   }
 
   applyProactivitySettings(): void {
@@ -722,7 +787,7 @@ export class ZaraRuntime {
   /* ----------------------------- proactivity ------------------------------ */
 
   /** Submit an observation candidate; the engine decides speak/wait/ignore. */
-  submitProactiveCandidate(c: Omit<ProactiveCandidate, "id" | "createdAt">): "SPEAK_NOW" | "WAIT" | "SAVE_FOR_LATER" | "IGNORE" {
+  submitProactiveCandidate(c: Omit<ProactiveCandidate, "id" | "createdAt">): "SPEAK_NOW" | "WAIT" | "SAVE_FOR_LATER" | "SILENCE" | "IGNORE" {
     const candidate: ProactiveCandidate = { ...c, id: "pc_" + Math.random().toString(36).slice(2, 9), createdAt: Date.now() };
     const scored = this.proactive.evaluate(candidate, {
       state: this.sm.state,
@@ -746,7 +811,7 @@ export class ZaraRuntime {
   private async submitSmartCandidate(
     c: Omit<ProactiveCandidate, "id" | "createdAt">,
     contextLine = ""
-  ): Promise<"SPEAK_NOW" | "WAIT" | "SAVE_FOR_LATER" | "IGNORE"> {
+  ): Promise<"SPEAK_NOW" | "WAIT" | "SAVE_FOR_LATER" | "SILENCE" | "IGNORE"> {
     const candidate: ProactiveCandidate = { ...c, id: "pc_" + Math.random().toString(36).slice(2, 9), createdAt: Date.now() };
     const memoryLines = this.retriever.retrieve(candidate.draft).slice(0, 4).map(m => m.record.content);
     const scored = await this.proactive.evaluateWithModel(candidate, {
@@ -931,6 +996,18 @@ export class ZaraRuntime {
     const lastEvent = this.perceptionCoordinator.normalizer.lastEvent;
     return {
       state: this.sm.state,
+      boot: (() => {
+        const b = this.bootTracker.snapshot();
+        return {
+          totalMs: b.totalMs,
+          complete: b.complete,
+          degraded: b.degraded,
+          stages: b.stages.map(s => ({
+            id: s.id, status: s.status, durationMs: s.durationMs,
+            error: s.error, fallback: s.fallback
+          }))
+        };
+      })(),
       lastTransition: this.sm.transitionHistory.length
         ? this.sm.transitionHistory[this.sm.transitionHistory.length - 1]
         : null,
@@ -994,6 +1071,9 @@ export class ZaraRuntime {
   setAvatarStatus(mode: "vrm" | "procedural" | "loading", detail: string): void {
     this.avatarStatus = { mode, detail };
     this.diag.log("avatar", "AVATAR_STATUS", { mode, detail });
+    // §19: the AVATAR boot stage completes whenever the renderer reports in.
+    if (mode === "vrm") this.bootTracker.markExternal("AVATAR", "OK");
+    else if (mode === "procedural") this.bootTracker.markExternal("AVATAR", "DEGRADED", { fallback: detail });
   }
 }
 

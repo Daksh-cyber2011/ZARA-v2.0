@@ -102,6 +102,33 @@ export default function DiagnosticsPanel() {
         )}
       </div>
 
+      {/* ---------------- 1a. boot record (§18/§19) ---------------------- */}
+      <div className="section-title">Boot — stages, durations, degradations</div>
+      <div className="card" style={{ padding: 10 }}>
+        {status ? (
+          <>
+            <Row
+              label="Boot"
+              value={`${status.boot.complete ? "complete" : "in progress"} — ${status.boot.totalMs}ms${status.boot.degraded ? " · DEGRADED" : ""}`}
+              warn={status.boot.degraded}
+            />
+            {status.boot.stages.map(s => {
+              if (s.id === "BOOT_COMPLETE") return null;
+              const label = s.id.split("_").map(w => w[0] + w.slice(1).toLowerCase()).join(" ");
+              const value =
+                s.status === "OK" ? `READY (${s.durationMs ?? 0}ms)` :
+                s.status === "DEGRADED" ? `DEGRADED — ${s.error ?? s.fallback ?? ""}` :
+                s.status === "FAILED" ? `FAILED — ${s.error ?? ""}` :
+                s.status === "SKIPPED" ? `skipped — ${s.fallback ?? ""}` :
+                s.status === "RUNNING" ? "starting…" : "pending";
+              return <Row key={s.id} label={label} value={value} warn={s.status === "DEGRADED" || s.status === "FAILED"} />;
+            })}
+          </>
+        ) : (
+          <div className="diag-line">gathering…</div>
+        )}
+      </div>
+
       {/* ------------------ 1b. capability states (§4) ------------------- */}
       <div className="section-title">Perception capabilities — real, not assumed</div>
       <div className="card" style={{ padding: 10 }}>

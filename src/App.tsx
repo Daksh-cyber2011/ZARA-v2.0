@@ -54,12 +54,36 @@ export default function App() {
   const [avatarMode, setAvatarMode] = useState<"vrm" | "procedural" | "loading">("loading");
 
   /* ------------------------------ boot ---------------------------------- */
+  /* §18: bounded boot. The runtime guards every stage with timeouts, AND
+   * this effect runs an independent failsafe: if init() has not returned
+   * within BOOT_FAILSAFEE_MS, the UI opens anyway (degraded) — the
+   * "ZARA is waking up…" forever bug is structurally impossible. */
+  const [bootStageLine, setBootStageLine] = useState("");
   useEffect(() => {
     let alive = true;
+    let initDone = false;
+    // Independent watchdog — lives OUTSIDE the runtime so even a runtime
+    // bug cannot freeze the UI (§18 belt-and-braces).
+    const failsafe = setTimeout(() => {
+      if (!initDone && alive) {
+        setBootStageLine("still starting — opening in degraded mode");
+        setBooted(true); // open the UI; runtime finishes in background
+      }
+    }, 15000);
+    // Live boot-stage progress (§19) for the waking screen.
+    const offBoot = zaraRuntime.diag.onRecord(r => {
+      if (r.category === "state" && r.event === "BOOT_STAGE" && !initDone) {
+        const d = r.detail as { stage?: string; status?: string };
+        if (d.stage) setBootStageLine(`${d.stage.toLowerCase().replace(/_/g, " ")} — ${d.status?.toLowerCase() ?? ""}`);
+      }
+    });
     (async () => {
       await zaraRuntime.init();
-      if (!alive) return;
+      if (!alive) { clearTimeout(failsafe); return; }
+      initDone = true;
+      clearTimeout(failsafe);
       const configured = await zaraRuntime.providers.configuredProviders();
+      if (!alive) return;
       setNeedsOnboarding(configured.length === 0);
       setBooted(true);
       // §34: seed the visible transcript with the restored conversation so
@@ -115,9 +139,9 @@ export default function App() {
       // runtime enters SHUTTING_DOWN and stops all subsystems (idempotent).
       const onPageHide = () => zaraRuntime.shutdown();
       window.addEventListener("pagehide", onPageHide);
-      return () => { offConfirmReq(); offConfirmRes(); offSpoke(); offSpeakStart(); offT(); offResumed(); window.removeEventListener("pagehide", onPageHide); };
+      return () => { offConfirmReq(); offConfirmRes(); offSpoke(); offSpeakStart(); offT(); offResumed(); offBoot(); window.removeEventListener("pagehide", onPageHide); };
     })();
-    return () => { alive = false; };
+    return () => { alive = false; clearTimeout(failsafe); offBoot(); };
   }, []);
 
   /* --------------------------- avatar (P1/P2) ------------------------------
@@ -236,7 +260,12 @@ export default function App() {
   /* ------------------------------ render --------------------------------- */
 
   if (!booted) {
-    return <div className="app" style={{ display: "grid", placeItems: "center", color: "var(--text-faint)" }}>ZARA is waking up…</div>;
+    return (
+      <div className="app" style={{ display: "grid", placeItems: "center", gap: 10, color: "var(--text-faint)" }}>
+        <div>ZARA is waking up…</div>
+        {bootStageLine && <div style={{ fontSize: 12, opacity: 0.7 }}>{bootStageLine}</div>}
+      </div>
+    );
   }
 
   return (

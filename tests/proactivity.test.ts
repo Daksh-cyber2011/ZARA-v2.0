@@ -39,26 +39,27 @@ describe("ProactiveDecisionEngine (§4-6, §39-40)", () => {
     expect(r.score).toBeGreaterThan(0.62);
   });
 
-  it("IGNORE is the default for weak candidates — silence is valid (§40)", () => {
+  it("SILENCE is the default for weak candidates — silence is valid (§8/§40)", () => {
     const { engine } = makeEngine();
     const r = engine.evaluate(candidate({
       relevance: 0.1, importance: 0.2, novelty: 0.1, confidence: 0.3,
       timeliness: 0.1, personalContext: 0.1, annoyanceCost: 0.8
     }), CTX);
-    expect(r.decision).toBe("IGNORE");
+    expect(r.decision).toBe("SILENCE");
+    expect(r.reason).toContain("silence");
   });
 
-  it("hard-gates on QUIET mode (§7)", () => {
+  it("hard-gates on QUIET mode with explicit SILENCE (§7/§8)", () => {
     const { engine } = makeEngine();
     const r = engine.evaluate(candidate(), { ...CTX, quietMode: true });
-    expect(r.decision).toBe("IGNORE");
+    expect(r.decision).toBe("SILENCE");
     expect(r.reason).toContain("quiet");
   });
 
-  it("hard-gates on SLEEP mode (§8)", () => {
+  it("hard-gates on SLEEP mode with explicit SILENCE (§8)", () => {
     const { engine } = makeEngine();
     const r = engine.evaluate(candidate(), { ...CTX, sleepMode: true });
-    expect(r.decision).toBe("IGNORE");
+    expect(r.decision).toBe("SILENCE");
   });
 
   it("WAITs while an active turn is in progress — 'interesting, but not now'", () => {

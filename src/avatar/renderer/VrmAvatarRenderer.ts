@@ -31,6 +31,16 @@ import {
 
 export type AvatarLoadStatus = "loading" | "ready" | "error";
 
+/** §24: race any promise against a hard deadline. Exported for tests. */
+export function raceWithDeadline<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms — falling back`)), ms);
+    })
+  ]);
+}
+
 export interface VrmAvatarOptions {
   /** URL of the VRM asset (default: bundled female character). */
   modelUrl?: string;
@@ -40,6 +50,10 @@ export interface VrmAvatarOptions {
 
 /** The bundled VRM model already faces +Z (toward a camera at positive Z). */
 const MODEL_YAW_RAD = 0;
+
+/** §24: hard ceiling on VRM asset loading — 12s covers slow tablet storage
+ * while guaranteeing the procedural fallback engages instead of hanging. */
+const VRM_LOAD_TIMEOUT_MS = 12000;
 
 export class VrmAvatarRenderer implements AvatarRenderer {
   private renderer: THREE.WebGLRenderer | null = null;
@@ -149,7 +163,13 @@ export class VrmAvatarRenderer implements AvatarRenderer {
     try {
       const loader = new GLTFLoader();
       loader.register(parser => new VRMLoaderPlugin(parser));
-      gltf = await loader.loadAsync(url);
+      // §24: VRM loading must be BOUNDED. A stalled fetch on a slow tablet
+      // must degrade to the procedural fallback, not hang "loading" forever.
+      gltf = await raceWithDeadline(
+        loader.loadAsync(url),
+        VRM_LOAD_TIMEOUT_MS,
+        "VRM asset load"
+      );
     } catch (err) {
       if (!this.stopped) {
         this.opts.onStatus?.("error", `VRM asset failed to load: ${err instanceof Error ? err.message : String(err)}`);
