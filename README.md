@@ -1,13 +1,33 @@
-# ZARA V2.0
+# ZARA V2.1
 
 **A persistent, proactive, memory-driven AI companion for Android — now with a
-full holographic presence stage.**
+full holographic presence stage and a companion-class adaptive UI.**
 
-V2.0 keeps everything that made V1.1 excellent (deterministic runtime, 306
-unit tests, honest engineering) and rebuilds the **experience layer** to a
-premium cyber-holographic standard: an immersive emotion-reactive stage, a
-real controllable 3D camera rig, a living particle field, glass HUD panels,
-and a staged boot sequence.
+> **V2.1 — the Companion Update:** aspect-aware avatar framing (never cropped,
+> never tiny, on any screen), a persistent conversation column on tablets /
+> desktop / landscape phones, humanized consumer copy, category-based Settings,
+> an editable Memory panel, emotionally-aware Persona v2, natural risk-based
+> action confirmations with opt-in approval memory, and a signed release APK.
+> Full details: **ZARA-V2.1-REPORT.md**.
+
+V2.0 rebuilt the **experience layer** to a premium cyber-holographic standard:
+an immersive emotion-reactive stage, a real controllable 3D camera rig, a
+living particle field, glass HUD panels, and a staged boot sequence.
+
+---
+
+## What's new in V2.1 — the Companion Update
+
+| System | What changed |
+|---|---|
+| **Aspect-aware framing** | Camera distances fit the model's real bounding box on BOTH axes; partial views anchor at the head with headroom — phones, tablets, desktop, portrait or landscape |
+| **Adaptive layout** | Phones keep the immersive stage + slide-over chat; tablets (>=768px), desktop and landscape phones get a persistent messenger-style chat column with tabs |
+| **Humanized UI** | All developer strings replaced with natural language; readable state labels; human type scale |
+| **Settings, rebuilt** | Five plain-language groups with proper controls (AI connection / Companion / Privacy / Background / Weather) |
+| **Memory, made yours** | Category filters, search, when-learned, importance bars, inline EDIT, per-item delete, two-step forget-all |
+| **Persona v2** | Reads how you write (frustration, excitement, confusion, urgency) and adapts tone + length; treats tools as capabilities to USE, not describe |
+| **Natural confirmations** | LOW risk just acts; HIGH risk asks once; opt-in "ask less for repeats" (10-minute, session-scoped approval memory) |
+| **Never-locked composer** | Keep typing while ZARA thinks — messages queue naturally |
 
 ---
 

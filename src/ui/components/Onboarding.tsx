@@ -64,8 +64,8 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
     <div className="onboard">
       <div className="onboard-card">
         <h1>ZARA</h1>
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.4em", color: "var(--text-faint)", marginBottom: 14 }}>
-          SET UP ZARA — SECURE CORE
+        <div style={{ fontSize: 12, letterSpacing: "0.2em", color: "var(--text-faint)", marginBottom: 14 }}>
+          First-time setup
         </div>
         <div className="sub">
           Your persistent AI companion. To think and speak, ZARA needs a brain —
@@ -84,7 +84,7 @@ export default function Onboarding({ onDone }: { onDone: () => void }) {
           </button>
           <button className={pick === "glm" ? "sel" : ""} onClick={() => { setPick("glm"); setBaseUrl(GLM_DEFAULT_URL); setModel("glm-5.2"); }}>
             <div className="t">GLM — optional</div>
-            <div className="d">Optional alternate brain. Only pick this if you ALREADY have a z.ai / bigmodel.cn key. Never required.</div>
+            <div className="d">Optional alternate brain. Only pick this if you already have a z.ai / bigmodel.cn key. Never required.</div>
           </button>
         </div>
 

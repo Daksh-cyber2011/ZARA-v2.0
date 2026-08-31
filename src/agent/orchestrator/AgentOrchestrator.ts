@@ -15,6 +15,7 @@ import { ChatMessage } from "../../cognition/provider/types";
 import { ContextEngine, ContextSnapshot, RankedMemoryText } from "../../cognition/context/ContextEngine";
 import { ToolRegistry } from "../tools/ToolRegistry";
 import { ConfirmationManager } from "../confirmation/ConfirmationManager";
+import { ApprovalPolicy } from "../confirmation/ApprovalPolicy";
 import { verifyResult, outcomePhrase } from "../verification/Verification";
 import { EventBus } from "../../core/events/EventBus";
 import { Diagnostics } from "../../core/logging/Diagnostics";
@@ -47,6 +48,9 @@ export interface AgentDeps {
   provider: () => LLMProvider;
   tools: ToolRegistry;
   confirmations: ConfirmationManager;
+  /** V2.1 §8-9: short-lived approval memory (opt-in) so identical actions
+   * don't re-confirm within the window. Android permissions are untouched. */
+  approvals?: ApprovalPolicy;
   context: ContextEngine;
   bus: EventBus;
   diag: Diagnostics;
@@ -64,7 +68,7 @@ export class AgentOrchestrator {
    * point; on interruption the turn ends INTERRUPTED (never a partial reply).
    */
   async runTurn(input: AgentTurnInput, token?: CancellationToken): Promise<AgentTurnResult> {
-    const { provider, tools, confirmations, context, bus, diag, sm, toolCtx } = this.deps;
+    const { provider, tools, confirmations, approvals, context, bus, diag, sm, toolCtx } = this.deps;
     const t = token ?? createCancellationToken();
     const toolSummaries: AgentTurnResult["toolSummaries"] = [];
     let emotion = "neutral";
@@ -136,7 +140,10 @@ export class AgentOrchestrator {
           }
 
           // ---- Safety / confirmation gate (§17-18) ----
-          const needsConfirm = tool.risk === "HIGH" || tool.requiresConfirmation;
+          // V2.1 §8-9: an identical action approved moments ago (opt-in)
+          // skips the repeat question. LOW-risk tools never ask at all.
+          const needsConfirm = (tool.risk === "HIGH" || tool.requiresConfirmation)
+            && !(approvals?.isRecentlyApproved(call.name, call.args) ?? false);
           if (needsConfirm) {
             await sm.requestTransition("WAITING", `confirm:${call.name}`);
             const question = buildConfirmationQuestion(call.name, call.args);
@@ -147,6 +154,7 @@ export class AgentOrchestrator {
               await sm.requestTransition("THINKING", "confirm-declined");
               continue;
             }
+            approvals?.recordApproval(call.name, call.args);
             await sm.requestTransition("EXECUTING", `approved:${call.name}`);
           } else {
             await sm.requestTransition("EXECUTING", `tool:${call.name}`);

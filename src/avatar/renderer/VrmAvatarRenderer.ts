@@ -34,6 +34,7 @@ import {
   selectViseme, visemeWeight, speechEnvelope, gazeOffsetFor,
   type VrmExpression, type Viseme
 } from "./vrmMapping";
+import { VIEW_SPECS, baseDistance, viewDistance, clampZoom, type FramingInput } from "./framing";
 
 export type AvatarLoadStatus = "loading" | "ready" | "error";
 
@@ -56,7 +57,8 @@ export interface VrmAvatarOptions {
   onProgress?: (phase: string, ratio: number) => void;
 }
 
-/** Camera presets. `auto` values are resolved from the real model bounds. */
+/** Camera presets. Distances are resolved per-view from the real model
+ * bounds AND the current canvas aspect (aspect-aware framing — V2.1). */
 export type CameraView = "portrait" | "front" | "threeQuarter" | "side" | "back" | "full";
 
 interface CameraRig {
@@ -65,15 +67,6 @@ interface CameraRig {
   dist: number;     // metres from target
   target: THREE.Vector3;
 }
-
-const VIEW_RIGS: Record<CameraView, { yaw: number; pitch: number; distScale: number; focus: "head" | "chest" | "hips" }> = {
-  portrait:     { yaw: 0,                 pitch: 0.02, distScale: 0.38, focus: "head" },
-  front:        { yaw: 0,                 pitch: 0.10, distScale: 1.0,  focus: "hips" },
-  threeQuarter: { yaw: -0.55,             pitch: 0.09, distScale: 1.0,  focus: "hips" },
-  side:         { yaw: -Math.PI / 2,      pitch: 0.07, distScale: 1.0,  focus: "hips" },
-  back:         { yaw: Math.PI,           pitch: 0.08, distScale: 1.0,  focus: "hips" },
-  full:         { yaw: -0.35,             pitch: 0.12, distScale: 1.28, focus: "hips" }
-};
 
 /** §24: hard ceiling on VRM asset loading. */
 const VRM_LOAD_TIMEOUT_MS = 20000;
@@ -106,6 +99,8 @@ export class VrmAvatarRenderer implements AvatarRenderer {
   private viewLocked = false;
   private eyeTracking = true;
   private baseDist = 1.9;
+  private aspect = 1;
+  private resizeObserver: ResizeObserver | null = null;
 
   private raf = 0;
   private clock = new THREE.Clock();
@@ -220,6 +215,13 @@ export class VrmAvatarRenderer implements AvatarRenderer {
     if (typeof window !== "undefined") {
       window.addEventListener("resize", () => this.resize(canvas));
       document.addEventListener("visibilitychange", this.onVisibility);
+    }
+    // Robust resize on WebViews where orientation changes do not always fire
+    // a window resize event (split-layout transitions, foldables, tablets).
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.resize(canvas));
+      this.resizeObserver.observe(canvas);
+      if (canvas.parentElement) this.resizeObserver.observe(canvas.parentElement);
     }
 
     void this.loadModel(this.opts.modelUrl ?? "assets/ZARA-avatar.vrm");
@@ -438,7 +440,7 @@ export class VrmAvatarRenderer implements AvatarRenderer {
   }
 
   zoomBy(delta: number): void {
-    this.rigGoal.dist = clamp(this.rigGoal.dist * (1 + delta), this.baseDist * 0.35, this.baseDist * 2.6);
+    this.rigGoal.dist = clampZoom(this.rigGoal.dist * (1 + delta), this.baseDist);
   }
 
   panBy(dx: number, dy: number): void {
@@ -451,11 +453,25 @@ export class VrmAvatarRenderer implements AvatarRenderer {
 
   setView(view: CameraView): void {
     this.view = view;
-    const spec = VIEW_RIGS[view];
+    this.applyViewGeometry();
+  }
+
+  /** Recompute the current view's yaw/pitch/dist/target from the REAL model
+   * bounds + current canvas aspect (the aspect-aware framing core). */
+  private applyViewGeometry(): void {
+    const spec = VIEW_SPECS[this.view];
+    if (!spec) return;
+    const input: FramingInput = {
+      modelHeight: this.modelHeight,
+      modelRadius: this.modelRadius,
+      fovDeg: this.camera?.fov ?? 30,
+      aspect: this.aspect
+    };
+    const { dist, focusY } = viewDistance(input, spec);
     this.rigGoal.yaw = spec.yaw;
     this.rigGoal.pitch = spec.pitch;
-    this.rigGoal.dist = this.baseDist * spec.distScale;
-    this.rigGoal.target.set(0, this.focusY(spec.focus), 0);
+    this.rigGoal.dist = dist;
+    this.rigGoal.target.set(0, focusY, 0);
   }
 
   setViewLocked(locked: boolean): void { this.viewLocked = locked; }
@@ -539,14 +555,18 @@ export class VrmAvatarRenderer implements AvatarRenderer {
       this.modelHeight = 1.55;
     }
 
-    /* Full-body framing distance from the real height: fit the character
-     * (plus breathing room) in the vertical FOV. dist = H / (2·tan(fov/2)). */
-    const fovRad = (this.camera?.fov ?? 30) * Math.PI / 180;
-    const fitHeight = this.modelHeight * 1.24;
-    const visibleDist = fitHeight / (2 * Math.tan(fovRad / 2));
-    this.baseDist = clamp(Math.max(visibleDist, this.modelRadius * 4.2), 1.0, 3.6);
+    /* Full-body base distance (zoom clamp reference) from the real height
+     * AND the current aspect — fits both axes so the character is never
+     * cropped on narrow screens or absurdly small on wide ones. */
+    const framing: FramingInput = {
+      modelHeight: this.modelHeight,
+      modelRadius: this.modelRadius,
+      fovDeg: this.camera?.fov ?? 30,
+      aspect: this.aspect
+    };
+    this.baseDist = clamp(baseDistance(framing), 0.9, 4.2);
 
-    this.setView(this.view === "threeQuarter" ? "threeQuarter" : this.view);
+    this.applyViewGeometry();
     this.rig = { ...this.rigGoal, target: this.rigGoal.target.clone() };
 
     this.blinkTimer = 0;
@@ -561,13 +581,29 @@ export class VrmAvatarRenderer implements AvatarRenderer {
     const w = Math.max(1, canvas.clientWidth || canvas.parentElement?.clientWidth || 640);
     const h = Math.max(1, canvas.clientHeight || canvas.parentElement?.clientHeight || 640);
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
+    const nextAspect = w / h;
+    const aspectChanged = Math.abs(nextAspect - this.aspect) > 0.001;
+    this.aspect = nextAspect;
+    this.camera.aspect = nextAspect;
     this.camera.updateProjectionMatrix();
+    // Aspect-aware framing: re-derive the current view's distance whenever the
+    // canvas shape changes (rotation, split-layout transitions, window resize).
+    if (aspectChanged && this.vrm) {
+      this.baseDist = clamp(baseDistance({
+        modelHeight: this.modelHeight,
+        modelRadius: this.modelRadius,
+        fovDeg: this.camera.fov,
+        aspect: this.aspect
+      }), 0.9, 4.2);
+      this.applyViewGeometry();
+    }
   }
 
   stop(): void {
     this.stopped = true;
     this.pauseLoop();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisibility);
     if (this.vrm) {
       try { VRMUtils.deepDispose(this.vrm.scene); } catch { /* already gone */ }

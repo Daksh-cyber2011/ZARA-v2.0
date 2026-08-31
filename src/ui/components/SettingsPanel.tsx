@@ -1,16 +1,53 @@
 /**
- * ZARA V1.0 — Settings panel. All ZARA behavior controls in one place.
+ * ZARA V2.1 — Settings panel.
+ *
+ * Consumer-grade settings: five clear groups, plain-language descriptions,
+ * consistent rows, honest explanations. No internal jargon, no section refs.
  */
 import { useState } from "react";
 import { zaraRuntime } from "../../ZaraRuntime";
 import { ZaraSettings } from "../../core/configuration/Settings";
 import { openAccessibilitySettings } from "../../native/ScreenAwareness";
+import { Icon } from "./Icons";
+
+/* ---------- small building blocks ---------- */
+
+function SettingRow(props: {
+  label: string;
+  sub?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="set-row">
+      <div className="set-text">
+        <div className="set-label">{props.label}</div>
+        {props.sub && <div className="set-sub">{props.sub}</div>}
+      </div>
+      <div className="set-ctrl">{props.children}</div>
+    </div>
+  );
+}
+
+function Section(props: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <>
+      <div className="section-title">{props.title}</div>
+      {props.sub && <div className="set-section-sub">{props.sub}</div>}
+      <div className="card">{props.children}</div>
+    </>
+  );
+}
+
+const inputCls = "set-input";
+
+/* ---------- panel ---------- */
 
 export default function SettingsPanel() {
   const [s, setS] = useState<ZaraSettings>({ ...zaraRuntime.settings.current });
   const [savedFlash, setSavedFlash] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
   const [screenStatus, setScreenStatus] = useState<string>("");
 
   async function patch(p: Partial<ZaraSettings>) {
@@ -30,225 +67,188 @@ export default function SettingsPanel() {
       await zaraRuntime.secrets.set(secretId, keyInput.trim());
       zaraRuntime.providers.invalidate();
       setKeyInput("");
+      setKeySaved(true);
+      setTimeout(() => setKeySaved(false), 1600);
     } finally { setKeyBusy(false); }
   }
 
   return (
     <div>
-      <div className="section-title">Brain / provider</div>
-      <div className="card">
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Provider</span>
-          <select
-            value={s.providerId}
-            onChange={e => patch({ providerId: e.target.value })}
-            style={{ width: 190 }}
-          >
-            <option value="gemini">Google Gemini (primary)</option>
+      {/* ---------------- AI connection ---------------- */}
+      <Section title="AI connection" sub="The brain ZARA thinks with. Google Gemini is the default — keys stay on this device.">
+        <SettingRow label="AI provider" sub="Gemini is the primary brain. Others are fully optional.">
+          <select value={s.providerId} onChange={e => patch({ providerId: e.target.value })} className={inputCls}>
+            <option value="gemini">Google Gemini</option>
             <option value="openai-compat">OpenAI-compatible</option>
-            <option value="glm">GLM — optional (Z.ai / BigModel)</option>
+            <option value="glm">GLM (Z.ai)</option>
           </select>
-        </div>
-        {s.providerId === "gemini" ? (
+        </SettingRow>
+
+        {s.providerId === "gemini" && (
           <>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Chat model</span>
-              <input value={s.chatModel} onChange={e => patch({ chatModel: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Live voice model</span>
-              <input value={s.liveModel} onChange={e => patch({ liveModel: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Voice</span>
-              <input value={s.voiceName} onChange={e => patch({ voiceName: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between">
-              <span className="label">API base URL <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(optional — empty = Google's official endpoint)</span></span>
-              <input value={s.geminiBaseUrl} onChange={e => patch({ geminiBaseUrl: e.target.value })} style={{ width: 190 }} placeholder="https://generativelanguage.googleapis.com" />
-            </div>
-          </>
-        ) : s.providerId === "glm" ? (
-          <>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Base URL</span>
-              <input value={s.glmBaseUrl} onChange={e => patch({ glmBaseUrl: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Model</span>
-              <input value={s.glmModel} onChange={e => patch({ glmModel: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between">
-              <span className="label">Thinking mode <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(deeper reasoning, slower)</span></span>
-              <button className={`toggle ${s.glmThinking ? "on" : ""}`} onClick={() => patch({ glmThinking: !s.glmThinking })} />
-            </div>
-            <div className="hint" style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>
-              GLM is a fully optional alternate brain — ZARA never requires it.
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="row-between" style={{ marginBottom: 12 }}>
-              <span className="label">Base URL</span>
-              <input value={s.openaiBaseUrl} onChange={e => patch({ openaiBaseUrl: e.target.value })} style={{ width: 190 }} />
-            </div>
-            <div className="row-between">
-              <span className="label">Model</span>
-              <input value={s.openaiModel} onChange={e => patch({ openaiModel: e.target.value })} style={{ width: 190 }} />
-            </div>
+            <SettingRow label="Chat model" sub="Which Gemini answers you.">
+              <input value={s.chatModel} onChange={e => patch({ chatModel: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="Live voice model" sub="Used for real-time voice sessions.">
+              <input value={s.liveModel} onChange={e => patch({ liveModel: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="Voice" sub="The voice she speaks with.">
+              <input value={s.voiceName} onChange={e => patch({ voiceName: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="API address" sub="Optional. Leave empty for Google's official endpoint.">
+              <input value={s.geminiBaseUrl} onChange={e => patch({ geminiBaseUrl: e.target.value })} className={inputCls} placeholder="Default (Google)" />
+            </SettingRow>
           </>
         )}
-        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+        {s.providerId === "glm" && (
+          <>
+            <SettingRow label="API address" sub="Where GLM requests are sent.">
+              <input value={s.glmBaseUrl} onChange={e => patch({ glmBaseUrl: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="Model" sub="Which GLM model answers you.">
+              <input value={s.glmModel} onChange={e => patch({ glmModel: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="Deeper thinking" sub="Slower, more thorough reasoning.">
+              <button className={`toggle ${s.glmThinking ? "on" : ""}`} onClick={() => patch({ glmThinking: !s.glmThinking })} />
+            </SettingRow>
+          </>
+        )}
+        {s.providerId === "openai-compat" && (
+          <>
+            <SettingRow label="API address" sub="Your OpenAI-compatible endpoint.">
+              <input value={s.openaiBaseUrl} onChange={e => patch({ openaiBaseUrl: e.target.value })} className={inputCls} />
+            </SettingRow>
+            <SettingRow label="Model" sub="Which model answers you.">
+              <input value={s.openaiModel} onChange={e => patch({ openaiModel: e.target.value })} className={inputCls} />
+            </SettingRow>
+          </>
+        )}
+
+        <div className="set-key">
           <input
             type="password"
             placeholder="Replace API key…"
             value={keyInput}
             onChange={e => setKeyInput(e.target.value)}
-            style={{ flex: 1 }}
+            className={inputCls}
+            onKeyDown={e => e.key === "Enter" && saveKey()}
           />
-          <button className="send-btn" style={{ height: 42, padding: "0 16px" }} disabled={keyBusy} onClick={saveKey}>
-            {keyBusy ? "Saving…" : "Save key"}
+          <button className="send-btn set-key-btn" disabled={keyBusy} onClick={saveKey}>
+            {keyBusy ? "…" : <Icon.key />}
           </button>
         </div>
-        <div className="hint" style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)" }}>
-          Keys are stored on this device only and are never displayed again after saving.
+        <div className="set-note">
+          {keySaved
+            ? "Key saved. It stays on this device and is never shown again."
+            : "Keys are stored on this device only, never uploaded, never displayed again."}
         </div>
-      </div>
+      </Section>
 
-      <div className="section-title">Proactivity</div>
-      <div className="card">
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Proactive companion mode</span>
+      {/* ---------------- Companion behaviour ---------------- */}
+      <Section title="Companion behaviour" sub="How ZARA acts, speaks up, and keeps you company.">
+        <SettingRow label="Speak up on her own" sub="Greeting you, following up on things — only when it's genuinely worth it.">
           <button className={`toggle ${s.proactivityEnabled ? "on" : ""}`} onClick={() => patch({ proactivityEnabled: !s.proactivityEnabled })} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Speak threshold <b>{s.proactivityThreshold.toFixed(2)}</b></span>
+        </SettingRow>
+        <SettingRow label={`How sure she must be (${s.proactivityThreshold.toFixed(2)})`} sub="Higher = she speaks up only when it really matters.">
           <input
             type="range" min={0.3} max={0.95} step={0.01}
             value={s.proactivityThreshold}
             onChange={e => patch({ proactivityThreshold: Number(e.target.value) })}
-            style={{ width: 150, padding: 0, background: "transparent", border: "none" }}
+            className="set-range"
           />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Cooldown (minutes)</span>
+        </SettingRow>
+        <SettingRow label="Quiet time between" sub="Minutes she waits before speaking up again.">
           <input type="number" min={1} max={120} value={s.proactivityCooldownMin}
-            onChange={e => patch({ proactivityCooldownMin: Math.max(1, Number(e.target.value) || 10) })} style={{ width: 90 }} />
-        </div>
-        <div className="row-between">
-          <span className="label">Daily proactive limit</span>
+            onChange={e => patch({ proactivityCooldownMin: Math.max(1, Number(e.target.value) || 10) })} className={`${inputCls} set-num`} />
+        </SettingRow>
+        <SettingRow label="Daily limit" sub="Most times she'll speak up unprompted per day.">
           <input type="number" min={1} max={60} value={s.proactivityDailyLimit}
-            onChange={e => patch({ proactivityDailyLimit: Math.max(1, Number(e.target.value) || 12) })} style={{ width: 90 }} />
-        </div>
-      </div>
+            onChange={e => patch({ proactivityDailyLimit: Math.max(1, Number(e.target.value) || 12) })} className={`${inputCls} set-num`} />
+        </SettingRow>
+        <SettingRow label="Ask less for repeats" sub="If you approve the same action twice (like messaging the same person), she stops re-asking for 10 minutes. Off by default.">
+          <button className={`toggle ${s.rememberApprovals ? "on" : ""}`} onClick={() => patch({ rememberApprovals: !s.rememberApprovals })} />
+        </SettingRow>
+        <SettingRow label="Sleep when idle" sub={`Minutes of quiet before she dozes off (0 = never).`}>
+          <input type="number" min={0} max={240} value={s.autoSleepMinutes}
+            onChange={e => patch({ autoSleepMinutes: Math.max(0, Number(e.target.value) || 0) })} className={`${inputCls} set-num`} />
+        </SettingRow>
+        <SettingRow label="Language" sub="She mirrors how you speak.">
+          <select value={s.language} onChange={e => patch({ language: e.target.value as ZaraSettings["language"] })} className={inputCls}>
+            <option value="auto">Auto / Hinglish</option>
+            <option value="en">English</option>
+            <option value="hi">Hindi</option>
+          </select>
+        </SettingRow>
+        <SettingRow label="Animated avatar" sub="Turn off for a simpler, lighter presence.">
+          <button className={`toggle ${s.animations ? "on" : ""}`} onClick={() => patch({ animations: !s.animations })} />
+        </SettingRow>
+      </Section>
 
-      <div className="section-title">Privacy & awareness (§11)</div>
-      <div className="card">
-        <div className="hint" style={{ marginBottom: 12, fontSize: 11, color: "var(--text-faint)" }}>
-          ZARA only perceives what you allow. Every toggle is honest — switching
-          something off disables it for real.
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">App awareness <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(lifecycle-derived observations)</span></span>
+      {/* ---------------- Privacy & awareness ---------------- */}
+      <Section title="Privacy & awareness" sub="ZARA only notices what you allow. Every switch is real — turning something off disables it for real.">
+        <SettingRow label="App awareness" sub="Notices when you come and go between apps.">
           <button className={`toggle ${s.appAwareness ? "on" : ""}`} onClick={() => patch({ appAwareness: !s.appAwareness })} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 8 }}>
-          <span className="label">Screen awareness <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(what app you're using — off by default)</span></span>
+        </SettingRow>
+        <SettingRow label="Screen awareness" sub="Which app you're using right now. Off by default.">
           <button className={`toggle ${s.screenAwareness ? "on" : ""}`} onClick={() => patch({ screenAwareness: !s.screenAwareness })} />
-        </div>
+        </SettingRow>
         {s.screenAwareness && (
-          <div style={{ marginBottom: 12, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, lineHeight: 1.55 }}>
-            <div style={{ marginBottom: 6 }}>
-              With screen awareness on, ZARA can notice <b>which app you're using and the
-              current screen's title</b> — nothing more. No screenshots, no OCR, no
-              passwords, no content upload. You must also enable the
-              "ZARA Screen Awareness" accessibility service in Android settings —
-              ZARA stays honest about that permission and never bypasses it.
+          <div className="set-deep">
+            <div className="set-deep-txt">
+              With screen awareness on, ZARA can notice <b>which app you're using and its title</b> — nothing
+              more. No screenshots, no reading content, no passwords. Android requires you to also enable
+              the "ZARA Screen Awareness" accessibility service yourself — ZARA never bypasses that.
             </div>
-            <div style={{ color: screenStatus ? "var(--text-faint)" : "var(--text-faint)", marginBottom: 8, fontSize: 11 }}>
-              {screenStatus || "Capability status: check the Diagnostics tab after enabling."}
-            </div>
+            <div className="set-deep-status">{screenStatus || "After enabling, check the System tab to confirm it's working."}</div>
             <button
-              className="send-btn"
-              style={{ height: 34, padding: "0 14px", fontSize: 12 }}
+              className="ghost-btn"
+              style={{ marginTop: 8, height: 36, padding: 0 }}
               onClick={async () => {
                 const ok = await openAccessibilitySettings();
                 setScreenStatus(ok
                   ? "Opened Android accessibility settings — enable \"ZARA Screen Awareness\" there, then come back."
-                  : "Accessibility settings are only available on the Android app.");
+                  : "Accessibility settings are only available in the Android app.");
               }}
             >
               Open Android accessibility settings
             </button>
           </div>
         )}
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Memory <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(remember across sessions)</span></span>
+        <SettingRow label="Memory" sub="Remembering you between sessions.">
           <button className={`toggle ${s.memoryEnabled ? "on" : ""}`} onClick={() => patch({ memoryEnabled: !s.memoryEnabled })} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Cloud reasoning <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(LLM calls)</span></span>
+        </SettingRow>
+        <SettingRow label="Cloud thinking" sub="Sends your messages to the AI provider to think.">
           <button className={`toggle ${s.cloudReasoning ? "on" : ""}`} onClick={() => patch({ cloudReasoning: !s.cloudReasoning })} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Voice <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(speech recognition & synthesis)</span></span>
+        </SettingRow>
+        <SettingRow label="Voice" sub="Speech recognition and speaking.">
           <button className={`toggle ${s.voiceEnabled ? "on" : ""}`} onClick={() => patch({ voiceEnabled: !s.voiceEnabled })} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Diagnostics logging <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(errors are always kept)</span></span>
+        </SettingRow>
+        <SettingRow label="Diagnostics logging" sub="Extra technical logs. Errors are always kept.">
           <button className={`toggle ${s.diagnosticsEnabled ? "on" : ""}`} onClick={() => patch({ diagnosticsEnabled: !s.diagnosticsEnabled })} />
-        </div>
-      </div>
+        </SettingRow>
+      </Section>
 
-      <div className="section-title">Background (§21)</div>
-      <div className="card">
-        <div className="row-between" style={{ marginBottom: 10 }}>
-          <span className="label">Keep ZARA alive in background <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(opt-in)</span></span>
+      {/* ---------------- Background ---------------- */}
+      <Section title="Background & battery" sub="Keep ZARA gently running when you switch away.">
+        <SettingRow label="Keep running in background" sub="Shows a quiet notification so she stays alive — opt-in, off by default.">
           <button className={`toggle ${s.keepAliveInBackground ? "on" : ""}`} onClick={() => patch({ keepAliveInBackground: !s.keepAliveInBackground })} />
+        </SettingRow>
+        <div className="set-note">
+          Honest limits: Android may still stop her under memory pressure or in deep sleep — but reminders
+          you set always survive, even restarts. Off by default to respect battery.
         </div>
-        <div className="hint" style={{ fontSize: 11, color: "var(--text-faint)", lineHeight: 1.5 }}>
-          Runs a visible, silent notification so the companion keeps running while
-          the app is backgrounded, for as long as Android permits. Honest limits:
-          Android may still stop the service under memory pressure or in deep
-          Doze; reminders set with ZARA always survive (they also survive device
-          restarts). Off by default to respect battery.
-        </div>
-      </div>
+      </Section>
 
-      <div className="section-title">Weather location (§47)</div>
-      <div className="card">
-        <div className="row-between" style={{ marginBottom: 8 }}>
-          <span className="label">City <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(blank = ZARA will ask)</span></span>
+      {/* ---------------- Weather ---------------- */}
+      <Section title="Weather" sub="So she knows your sky.">
+        <SettingRow label="Your city" sub="Leave empty and she'll just ask.">
           <input value={s.weatherLocation} placeholder="e.g. Delhi"
-            onChange={e => patch({ weatherLocation: e.target.value })} style={{ width: 190 }} />
-        </div>
-        <div className="hint" style={{ fontSize: 11, color: "var(--text-faint)" }}>
-          Used only by the weather tool. No background location tracking.
-        </div>
-      </div>
+            onChange={e => patch({ weatherLocation: e.target.value })} className={inputCls} />
+        </SettingRow>
+        <div className="set-note">Used only for weather. No location tracking, ever.</div>
+      </Section>
 
-      <div className="section-title">Behavior</div>
-      <div className="card">
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Auto-sleep after idle (minutes, 0 = never)</span>
-          <input type="number" min={0} max={240} value={s.autoSleepMinutes}
-            onChange={e => patch({ autoSleepMinutes: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 90 }} />
-        </div>
-        <div className="row-between" style={{ marginBottom: 12 }}>
-          <span className="label">Language</span>
-          <select value={s.language} onChange={e => patch({ language: e.target.value as ZaraSettings["language"] })} style={{ width: 150 }}>
-            <option value="auto">Auto / Hinglish</option>
-            <option value="en">English</option>
-            <option value="hi">Hindi</option>
-          </select>
-        </div>
-        <div className="row-between">
-          <span className="label">Avatar animations</span>
-          <button className={`toggle ${s.animations ? "on" : ""}`} onClick={() => patch({ animations: !s.animations })} />
-        </div>
-      </div>
-
-      {savedFlash && <div style={{ color: "var(--green)", fontSize: 12.5, textAlign: "center", padding: 6 }}>Saved</div>}
+      {savedFlash && <div className="set-saved">Saved</div>}
     </div>
   );
 }

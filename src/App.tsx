@@ -1,14 +1,21 @@
 /**
- * ZARA V2 — Main application shell.
+ * ZARA V2.1 — Main application shell.
  *
- * One immersive screen: ZARA's holographic presence fills the viewport;
- * floating glass HUD layers (status bar · composer dock · slide-over panels)
- * keep her front-and-center. The whole interface breathes with the REAL
- * runtime state + emotion theme (§8/§29/§30) — nothing is decorative.
+ * One adaptive interface, two presentations:
  *
- * Layers (bottom → top):
- *   backdrop glow (emotion-themed) → living layer (canvas) → VRM avatar →
- *   camera chips → transcript overlay → HUD bar → dock composer → panels.
+ *  PHONE (portrait, narrow) — immersive single stage: ZARA fills the screen,
+ *  a compact composer dock at the bottom, chat/memory/settings as a slide-over.
+ *
+ *  COMPANION (tablets ≥768px, desktop, landscape phones) — a persistent
+ *  conversation column lives beside the stage, messenger-style, so the
+ *  dialogue is ALWAYS visible on big screens instead of hidden in a drawer.
+ *  Tabbed panel head replaces the floating rail.
+ *
+ * The layout switch is done in CSS (media queries) AND mirrored in JS
+ * (useWideLayout) so React knows which content to render by default.
+ *
+ * The whole interface breathes with the REAL runtime state + emotion theme —
+ * nothing is decorative.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import { zaraRuntime } from "./ZaraRuntime";
@@ -31,19 +38,61 @@ interface ChatMsg {
   tools?: { tool: string; outcome: string; status: string }[];
 }
 
+type PanelId = "chat" | "memory" | "settings" | "diagnostics";
+
+/** Humanized fallback boot lines — real stage lines arrive from diagnostics. */
 const BOOT_STAGES = [
-  "LINKING COGNITION CORE",
-  "RESTORING MEMORY LATTICE",
-  "CALIBRATING VOICE PIPELINE",
-  "MATERIALIZING PRESENCE"
+  "Warming up…",
+  "Remembering what matters…",
+  "Tuning my voice…",
+  "Almost there…"
 ];
 
 const QUICK_ACTIONS: { label: string; hint: string }[] = [
-  { label: "YouTube", hint: "Open YouTube" },
+  { label: "Open YouTube", hint: "Open YouTube" },
   { label: "Remind me", hint: "Remind me tomorrow at 7pm to study" },
-  { label: "Remember", hint: "Remember that I'm building ZARA" },
+  { label: "Remember this", hint: "Remember that I'm building ZARA" },
   { label: "Be quiet", hint: "Zara, be quiet" }
 ];
+
+const VIEW_LABELS: Record<CameraView, string> = {
+  portrait: "Close-up",
+  front: "Front",
+  threeQuarter: "¾ view",
+  side: "Side",
+  back: "Back",
+  full: "Full body"
+};
+
+const PANEL_TITLES: Record<PanelId, string> = {
+  chat: "Chat",
+  memory: "Memory",
+  settings: "Settings",
+  diagnostics: "System"
+};
+
+/* Media queries that enable the companion split layout. MUST match CSS. */
+const WIDE_QUERY = "(min-width: 768px) and (min-height: 480px)";
+const WIDE_LANDSCAPE_QUERY = "(min-width: 640px) and (max-height: 479px) and (orientation: landscape)";
+
+/** Reactive viewport mode — true when the persistent chat column is shown. */
+function useWideLayout(): boolean {
+  const [wide, setWide] = useState(() => {
+    try {
+      return window.matchMedia(WIDE_QUERY).matches || window.matchMedia(WIDE_LANDSCAPE_QUERY).matches;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    const mqs = [window.matchMedia(WIDE_QUERY), window.matchMedia(WIDE_LANDSCAPE_QUERY)];
+    const update = () => setWide(mqs[0].matches || mqs[1].matches);
+    update();
+    mqs.forEach(m => m.addEventListener("change", update));
+    return () => mqs.forEach(m => m.removeEventListener("change", update));
+  }, []);
+  return wide;
+}
 
 export default function App() {
   const [booted, setBooted] = useState(false);
@@ -54,7 +103,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [confirmQ, setConfirmQ] = useState<{ callId: string; tool: string; summary: string } | null>(null);
-  const [panel, setPanel] = useState<"chat" | "memory" | "settings" | "diagnostics" | null>(null);
+  const [panel, setPanel] = useState<PanelId | null>(null);
   const [emotion, setEmotion] = useState("neutral");
   const [perceptionLine, setPerceptionLine] = useState("");
   const [avatarReady, setAvatarReady] = useState(false);
@@ -65,7 +114,12 @@ export default function App() {
   const [eyeTracking, setEyeTracking] = useState(true);
   const [viewLocked, setViewLocked] = useState(false);
   const [cameraView, setCameraView] = useState<CameraView>("threeQuarter");
+  const [camOpen, setCamOpen] = useState(false);
   const [nativeOnline, setNativeOnline] = useState<boolean | null>(null);
+
+  const wide = useWideLayout();
+  /* In companion mode the column is always mounted — chat is the default tab. */
+  const activePanel: PanelId | null = panel ?? (wide ? "chat" : null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const vrmCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -76,6 +130,9 @@ export default function App() {
   const livingRef2 = useRef<LivingLayer | null>(null);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  /* Composer never locks: typed messages queue naturally while ZARA thinks. */
+  const busyRef = useRef(false);
+  const queueRef = useRef<string[]>([]);
 
   const theme = themeFor(emotion as never);
   const lastZaraMsg = [...msgs].reverse().find(m => m.who === "zara");
@@ -182,8 +239,8 @@ export default function App() {
             setBootRatio(1);
             zaraRuntime.setAvatarStatus("vrm", "VRM female character ready");
           } else if (status === "error") {
-            setAvatarError(detail ?? "VRM unavailable — procedural fallback");
-            zaraRuntime.setAvatarStatus("procedural", detail ?? "VRM unavailable — procedural fallback");
+            setAvatarError(detail ?? "VRM unavailable — simplified presence");
+            zaraRuntime.setAvatarStatus("procedural", detail ?? "VRM unavailable — simplified presence");
           }
         }
       });
@@ -193,7 +250,7 @@ export default function App() {
     } else {
       // Animations disabled by the user (or no canvas): open immediately
       // with the procedural core visual — never a forever-boot.
-      setAvatarError("ANIMATIONS OFF — CORE VISUAL");
+      setAvatarError("Animations are off — using the simplified presence");
     }
     return () => {
       proceduralRef.current?.stop();
@@ -238,23 +295,39 @@ export default function App() {
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, confirmQ, panel]);
+  }, [msgs, confirmQ, activePanel]);
 
   /* ------------------------------ actions -------------------------------- */
 
+  /**
+   * Send a message. The composer is NEVER disabled — if ZARA is mid-turn,
+   * new messages queue and flow out as soon as she finishes. Typing while
+   * she thinks is normal messenger behaviour, not an error state.
+   */
   const send = useCallback(async (raw?: string) => {
     const text = (raw ?? input).trim();
-    if (!text || busy) return;
+    if (!text) return;
     setInput("");
+    if (busyRef.current) {
+      queueRef.current.push(text);
+      return;
+    }
+    busyRef.current = true;
     setBusy(true);
-    const reply = await zaraRuntime.handleUserText(text);
-    setMsgs(m => {
-      const next = [...m];
-      if (reply) next.push({ who: "zara", text: reply });
-      return next;
-    });
-    setBusy(false);
-  }, [input, busy]);
+    try {
+      const reply = await zaraRuntime.handleUserText(text);
+      setMsgs(m => {
+        const next = [...m];
+        if (reply) next.push({ who: "zara", text: reply });
+        return next;
+      });
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      const next = queueRef.current.shift();
+      if (next) void send(next);
+    }
+  }, [input]);
 
   const toggleVoice = useCallback(async () => {
     if (listening) {
@@ -283,6 +356,7 @@ export default function App() {
     vrmRef.current?.setViewLocked(false);
     setViewLocked(false);
     setCameraView(view);
+    setCamOpen(false);
   }, []);
 
   const toggleEyeTracking = useCallback(() => {
@@ -297,12 +371,16 @@ export default function App() {
     setViewLocked(next);
   }, [viewLocked]);
 
+  const openPanel = useCallback((p: PanelId) => {
+    setPanel(cur => (cur === p && !wide ? null : p));
+  }, [wide]);
+
   /* ------------------------------ boot gate ------------------------------ */
 
   /* The stage canvases mount as soon as the runtime is up so the VRM model
    * starts loading immediately; the boot overlay floats ON TOP until the
    * character is ready, failed (→ procedural fallback), or timed out
-   * (never a forever-boot: §18 belt-and-braces). No chicken-and-egg between
+   * (never a forever-boot: belt-and-braces). No chicken-and-egg between
    * the overlay and the canvas mount — that deadlock is what hid the model. */
   const [stageTimedOut, setStageTimedOut] = useState(false);
   useEffect(() => {
@@ -323,11 +401,11 @@ export default function App() {
             <div className="boot-ring r2" />
           </div>
           <div className="boot-title">ZARA</div>
-          <div className="boot-sub">PERSISTENT AI COMPANION</div>
+          <div className="boot-sub">your AI companion</div>
           <div className="boot-progress">
             <div className="boot-bar"><div className="boot-fill" style={{ width: `${Math.round(bootRatio * 100)}%` }} /></div>
             <div className="boot-meta">
-              <span>{bootStageLine || BOOT_STAGES[bootPhase] || "LINKING COGNITION CORE"}</span>
+              <span>{bootStageLine || BOOT_STAGES[bootPhase] || "Warming up…"}</span>
               <span>{Math.round(bootRatio * 100)}%</span>
             </div>
           </div>
@@ -342,7 +420,7 @@ export default function App() {
   const hudColor = STATE_HUD_COLORS[state];
 
   return (
-    <div className="app" style={{ ["--z-primary" as string]: theme.primary, ["--z-secondary" as string]: theme.secondary }}>
+    <div className={`app ${wide ? "wide" : ""}`} style={{ ["--z-primary" as string]: theme.primary, ["--z-secondary" as string]: theme.secondary }}>
       {/* boot overlay — floats above the stage while the character loads */}
       {!stageOpen && (
         <div className="boot overlay">
@@ -353,15 +431,15 @@ export default function App() {
               <div className="boot-ring r2" />
             </div>
             <div className="boot-title">ZARA</div>
-            <div className="boot-sub">PERSISTENT AI COMPANION</div>
+            <div className="boot-sub">your AI companion</div>
             <div className="boot-progress">
               <div className="boot-bar"><div className="boot-fill" style={{ width: `${Math.round(bootRatio * 100)}%` }} /></div>
               <div className="boot-meta">
-                <span>{bootStageLine || BOOT_STAGES[bootPhase] || "LINKING COGNITION CORE"}</span>
+                <span>{bootStageLine || BOOT_STAGES[bootPhase] || "Warming up…"}</span>
                 <span>{Math.round(bootRatio * 100)}%</span>
               </div>
             </div>
-            {avatarError && <div className="boot-fallback">PROJECTION DEGRADED — SWITCHING TO CORE VISUAL</div>}
+            {avatarError && <div className="boot-fallback">Taking a moment — opening with the simplified look</div>}
           </div>
           <div className="boot-grid" />
         </div>
@@ -380,35 +458,47 @@ export default function App() {
           <canvas ref={vrmCanvasRef} style={{ display: avatarError ? "none" : "block" }} />
         </div>
 
-        {/* camera controls */}
-        <div className="cam-dock">
-          <div className="cam-row">
-            <button className={`cam-chip ${eyeTracking ? "on" : ""}`} onClick={toggleEyeTracking}>
-              {eyeTracking ? "EYES LIVE" : "EYES AUTO"}
-            </button>
-            <button className={`cam-chip ${viewLocked ? "lock" : ""}`} onClick={toggleViewLock}>
-              {viewLocked ? "VIEW LOCKED" : "VIEW FREE"}
-            </button>
-          </div>
-          <div className="cam-row">
-            {(["portrait", "front", "threeQuarter", "side", "back", "full"] as CameraView[]).map(v => (
-              <button key={v} className={`cam-view ${cameraView === v ? "on" : ""}`} onClick={() => applyCamera(v)}>
-                {v === "threeQuarter" ? "¾" : v === "portrait" ? "BUST" : v.toUpperCase()}
-              </button>
-            ))}
-          </div>
-          <div className="cam-hint">DRAG ROTATE · PINCH ZOOM · DOUBLE-TAP RESET</div>
+        {/* camera controls — one quiet button, expands when wanted */}
+        <div className={`cam-wrap ${camOpen ? "open" : ""}`}>
+          <button
+            className={`cam-fab ${camOpen ? "on" : ""}`}
+            title="Camera views"
+            onClick={() => setCamOpen(o => !o)}
+          >
+            <Icon.camera />
+          </button>
+          {camOpen && (
+            <div className="cam-pop">
+              <div className="cam-pop-title">Camera</div>
+              <div className="cam-grid">
+                {(["portrait", "front", "threeQuarter", "side", "back", "full"] as CameraView[]).map(v => (
+                  <button key={v} className={`cam-view ${cameraView === v ? "on" : ""}`} onClick={() => applyCamera(v)}>
+                    {VIEW_LABELS[v]}
+                  </button>
+                ))}
+              </div>
+              <div className="cam-pop-row">
+                <button className={`cam-chip ${eyeTracking ? "on" : ""}`} onClick={toggleEyeTracking}>
+                  Eye contact {eyeTracking ? "on" : "off"}
+                </button>
+                <button className={`cam-chip ${viewLocked ? "lock" : ""}`} onClick={toggleViewLock}>
+                  {viewLocked ? "View locked" : "Free view"}
+                </button>
+              </div>
+              <div className="cam-hint">Drag to rotate · pinch to zoom · double-tap to reset</div>
+            </div>
+          )}
         </div>
 
-        {/* emotion + perception readout */}
+        {/* mood + awareness readout */}
         <div className="stage-caption">
           <span className="mood">{theme.label}</span>
           <span className="sep">·</span>
-          <span className="perc">{perceptionLine || "perception starting…"}</span>
+          <span className="perc">{perceptionLine || "settling in…"}</span>
         </div>
       </div>
 
-      {/* ---------- HUD top bar ---------- */}
+      {/* ---------- top bar ---------- */}
       <div className="hud">
         <div className="hud-brand">
           <span className="logo-dot" />
@@ -418,12 +508,11 @@ export default function App() {
           <span className="dot" />
           {STATE_LABELS[state]}
         </div>
-        {listening && <div className="state-chip live"><span className="dot" />LIVE VOICE</div>}
+        {listening && <div className="state-chip live"><span className="dot" />Voice live</div>}
         <div className="hud-chips">
-          <div className={`chip ${nativeOnline === null ? "" : nativeOnline ? "ok" : "dim"}`}>
-            <span className="chip-dot" />{nativeOnline === null ? "WEB" : nativeOnline ? "CORE ONLINE" : "WEB PREVIEW"}
+          <div className={`chip ${nativeOnline ? "ok" : "dim"}`}>
+            <span className="chip-dot" />{nativeOnline === null ? "Starting…" : nativeOnline ? "On device" : "Web preview"}
           </div>
-          <div className="chip ok"><span className="chip-dot" />MEM-LINK ACTIVE</div>
         </div>
         <div className="hud-spacer" />
         {zaraRuntime.isQuiet ? (
@@ -440,22 +529,22 @@ export default function App() {
         </button>
       </div>
 
-      {/* ---------- latest message toast (chat panel closed) ---------- */}
-      {panel !== "chat" && lastZaraMsg?.text && (
+      {/* ---------- latest message toast (chat not on screen) ---------- */}
+      {activePanel !== "chat" && lastZaraMsg?.text && (
         <div className="toast" onClick={() => setPanel("chat")}>
           <span className="toast-who">ZARA</span>
           <span className="toast-text">{lastZaraMsg.text}</span>
         </div>
       )}
 
-      {/* ---------- composer dock ---------- */}
+      {/* ---------- composer dock (bottom of stage on phone / bottom of chat column on companion) ---------- */}
       <div className="dock">
         {confirmQ && (
           <div className="confirm-card">
             <div className="q">{confirmQ.summary}</div>
             <div className="row">
-              <button className="yes" onClick={() => answerConfirm(true)}>YES, GO AHEAD</button>
-              <button className="no" onClick={() => answerConfirm(false)}>NO</button>
+              <button className="yes" onClick={() => answerConfirm(true)}>Yes, go ahead</button>
+              <button className="no" onClick={() => answerConfirm(false)}>No</button>
             </div>
           </div>
         )}
@@ -474,35 +563,47 @@ export default function App() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && send()}
             placeholder={zaraRuntime.isQuiet ? "Quiet mode — ZARA won't speak proactively" : "Message ZARA…"}
-            disabled={busy}
           />
           {state === "SPEAKING" ? (
             <button className="stop-btn" onClick={interrupt}>STOP</button>
           ) : (
-            <button className="send-btn" onClick={() => send()} disabled={busy || !input.trim()}>
+            <button className="send-btn" onClick={() => send()} disabled={!input.trim()}>
               <Icon.send />
             </button>
           )}
         </div>
       </div>
 
-      {/* ---------- slide-over panels ---------- */}
-      <aside className={`panel ${panel ? "open" : ""}`}>
-        {panel && (
+      {/* ---------- conversation column (slide-over on phone · persistent on companion) ---------- */}
+      <aside className={`panel ${activePanel ? "open" : ""}`}>
+        {activePanel && (
           <>
+            {/* phone head: title + close / companion head: tabs */}
             <div className="panel-head">
-              <span className="panel-title">
-                {panel === "chat" ? "CONVERSATION" : panel === "memory" ? "MEMORY CORE" : panel === "settings" ? "SETTINGS" : "DIAGNOSTICS"}
-              </span>
+              <span className="panel-title">{PANEL_TITLES[activePanel]}</span>
+              <div className="panel-tabs">
+                <button className={`tab ${activePanel === "chat" ? "on" : ""}`} onClick={() => setPanel("chat")}>
+                  <Icon.send /><span>Chat</span>
+                </button>
+                <button className={`tab ${activePanel === "memory" ? "on" : ""}`} onClick={() => setPanel("memory")}>
+                  <Icon.brain /><span>Memory</span>
+                </button>
+                <button className={`tab ${activePanel === "settings" ? "on" : ""}`} onClick={() => setPanel("settings")}>
+                  <Icon.settings /><span>Settings</span>
+                </button>
+                <button className={`tab ${activePanel === "diagnostics" ? "on" : ""}`} onClick={() => setPanel("diagnostics")}>
+                  <Icon.activity /><span>System</span>
+                </button>
+              </div>
               <button className="panel-close" onClick={() => setPanel(null)}><Icon.x /></button>
             </div>
             <div className="panel-body">
-              {panel === "chat" && (
+              {activePanel === "chat" && (
                 <>
                   {msgs.length === 0 && (
                     <div className="empty-state">
-                      <div className="empty-title">TALK TO ZARA</div>
-                      <div className="empty-sub">Type below, tap the mic for live voice, or try a quick action.</div>
+                      <div className="empty-title">Say hi to ZARA</div>
+                      <div className="empty-sub">Type below, tap the mic for live voice, or try one of these.</div>
                       <div className="quick-grid">
                         {QUICK_ACTIONS.map(qa => (
                           <button key={qa.label} className="quick-chip" onClick={() => send(qa.hint)}>
@@ -514,7 +615,7 @@ export default function App() {
                   )}
                   {msgs.map((m, i) => (
                     <div className={`msg ${m.who}`} key={i}>
-                      <div className="who">{m.who === "user" ? "YOU" : "ZARA"}</div>
+                      <div className="who">{m.who === "user" ? "You" : "ZARA"}</div>
                       <div className="bubble">{m.text}</div>
                     </div>
                   ))}
@@ -529,29 +630,29 @@ export default function App() {
                   <div ref={streamEndRef} />
                 </>
               )}
-              {panel === "memory" && <MemoryPanel />}
-              {panel === "settings" && <SettingsPanel />}
-              {panel === "diagnostics" && <DiagnosticsPanel />}
+              {activePanel === "memory" && <MemoryPanel />}
+              {activePanel === "settings" && <SettingsPanel />}
+              {activePanel === "diagnostics" && <DiagnosticsPanel />}
             </div>
           </>
         )}
       </aside>
 
-      {panel && <div className="panel-scrim" onClick={() => setPanel(null)} />}
+      {panel && !wide && <div className="panel-scrim" onClick={() => setPanel(null)} />}
 
-      {/* ---------- panel launcher rail ---------- */}
+      {/* ---------- panel launcher rail (phone only — companion uses tabs) ---------- */}
       <div className="rail">
-        <button className={`rail-btn ${panel === "chat" ? "on" : ""}`} title="Conversation" onClick={() => setPanel(panel === "chat" ? null : "chat")}>
-          <Icon.send /><span>CHAT</span>
+        <button className={`rail-btn ${activePanel === "chat" ? "on" : ""}`} title="Chat" onClick={() => openPanel("chat")}>
+          <Icon.send /><span>Chat</span>
         </button>
-        <button className={`rail-btn ${panel === "memory" ? "on" : ""}`} title="Memory core" onClick={() => setPanel(panel === "memory" ? null : "memory")}>
-          <Icon.brain /><span>MEMORY</span>
+        <button className={`rail-btn ${activePanel === "memory" ? "on" : ""}`} title="Memory" onClick={() => openPanel("memory")}>
+          <Icon.brain /><span>Memory</span>
         </button>
-        <button className={`rail-btn ${panel === "settings" ? "on" : ""}`} title="Settings" onClick={() => setPanel(panel === "settings" ? null : "settings")}>
-          <Icon.settings /><span>SETTINGS</span>
+        <button className={`rail-btn ${activePanel === "settings" ? "on" : ""}`} title="Settings" onClick={() => openPanel("settings")}>
+          <Icon.settings /><span>Settings</span>
         </button>
-        <button className={`rail-btn ${panel === "diagnostics" ? "on" : ""}`} title="Diagnostics" onClick={() => setPanel(panel === "diagnostics" ? null : "diagnostics")}>
-          <Icon.activity /><span>CORE</span>
+        <button className={`rail-btn ${activePanel === "diagnostics" ? "on" : ""}`} title="System" onClick={() => openPanel("diagnostics")}>
+          <Icon.activity /><span>System</span>
         </button>
       </div>
     </div>

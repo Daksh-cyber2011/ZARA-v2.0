@@ -24,22 +24,22 @@ export interface StageTheme {
 
 /** ZARA signature palette — cyan core, violet soul, per-emotion drift. */
 export const EMOTION_THEMES: Readonly<Record<AvatarEmotion, StageTheme>> = {
-  neutral:   { primary: "#22d3ee", secondary: "#6366f1", glow: "rgba(34,211,238,0.16)", label: "STABLE" },
-  listening: { primary: "#22d3ee", secondary: "#0ea5e9", glow: "rgba(34,211,238,0.20)", label: "LISTENING" },
-  thinking:  { primary: "#a78bfa", secondary: "#e879f9", glow: "rgba(167,139,250,0.18)", label: "THINKING" },
-  speaking:  { primary: "#818cf8", secondary: "#22d3ee", glow: "rgba(129,140,248,0.20)", label: "SPEAKING" },
-  happy:     { primary: "#fbbf24", secondary: "#f472b6", glow: "rgba(251,191,36,0.18)",  label: "HAPPY" },
-  excited:   { primary: "#e879f9", secondary: "#fbbf24", glow: "rgba(232,121,249,0.20)", label: "EXCITED" },
-  curious:   { primary: "#2dd4bf", secondary: "#22d3ee", glow: "rgba(45,212,191,0.18)",  label: "CURIOUS" },
-  focused:   { primary: "#818cf8", secondary: "#3b82f6", glow: "rgba(129,140,248,0.16)", label: "FOCUSED" },
-  confused:  { primary: "#f59e0b", secondary: "#94a3b8", glow: "rgba(245,158,11,0.15)",  label: "PUZZLED" },
-  surprised: { primary: "#fb7185", secondary: "#fbbf24", glow: "rgba(251,113,133,0.20)", label: "SURPRISED" },
-  sad:       { primary: "#64748b", secondary: "#6366f1", glow: "rgba(100,116,139,0.16)", label: "DOWN" },
-  playful:   { primary: "#f472b6", secondary: "#a78bfa", glow: "rgba(244,114,182,0.20)", label: "PLAYFUL" },
-  proud:     { primary: "#fbbf24", secondary: "#f59e0b", glow: "rgba(251,191,36,0.20)",  label: "PROUD" },
-  sleepy:    { primary: "#6366f1", secondary: "#64748b", glow: "rgba(99,102,241,0.14)",  label: "SLEEPY" },
-  error:     { primary: "#f43f5e", secondary: "#fb923c", glow: "rgba(244,63,94,0.18)",   label: "ERROR" },
-  quiet:     { primary: "#2dd4bf", secondary: "#475569", glow: "rgba(45,212,191,0.10)",  label: "QUIET" }
+  neutral:   { primary: "#22d3ee", secondary: "#6366f1", glow: "rgba(34,211,238,0.16)", label: "calm" },
+  listening: { primary: "#22d3ee", secondary: "#0ea5e9", glow: "rgba(34,211,238,0.20)", label: "listening" },
+  thinking:  { primary: "#a78bfa", secondary: "#e879f9", glow: "rgba(167,139,250,0.18)", label: "thinking" },
+  speaking:  { primary: "#818cf8", secondary: "#22d3ee", glow: "rgba(129,140,248,0.20)", label: "talking" },
+  happy:     { primary: "#fbbf24", secondary: "#f472b6", glow: "rgba(251,191,36,0.18)",  label: "happy" },
+  excited:   { primary: "#e879f9", secondary: "#fbbf24", glow: "rgba(232,121,249,0.20)", label: "excited" },
+  curious:   { primary: "#2dd4bf", secondary: "#22d3ee", glow: "rgba(45,212,191,0.18)",  label: "curious" },
+  focused:   { primary: "#818cf8", secondary: "#3b82f6", glow: "rgba(129,140,248,0.16)", label: "focused" },
+  confused:  { primary: "#f59e0b", secondary: "#94a3b8", glow: "rgba(245,158,11,0.15)",  label: "puzzled" },
+  surprised: { primary: "#fb7185", secondary: "#fbbf24", glow: "rgba(251,113,133,0.20)", label: "surprised" },
+  sad:       { primary: "#64748b", secondary: "#6366f1", glow: "rgba(100,116,139,0.16)", label: "a bit down" },
+  playful:   { primary: "#f472b6", secondary: "#a78bfa", glow: "rgba(244,114,182,0.20)", label: "playful" },
+  proud:     { primary: "#fbbf24", secondary: "#f59e0b", glow: "rgba(251,191,36,0.20)",  label: "proud" },
+  sleepy:    { primary: "#6366f1", secondary: "#64748b", glow: "rgba(99,102,241,0.14)",  label: "sleepy" },
+  error:     { primary: "#f43f5e", secondary: "#fb923c", glow: "rgba(244,63,94,0.18)",   label: "recovering" },
+  quiet:     { primary: "#2dd4bf", secondary: "#475569", glow: "rgba(45,212,191,0.10)",  label: "quiet" }
 };
 
 /** HUD color per runtime state (chip dot + status lighting cues). */
@@ -52,10 +52,10 @@ export const STATE_HUD_COLORS: Readonly<Record<ZaraState, string>> = {
 
 /** Human label per runtime state for the HUD chip. */
 export const STATE_LABELS: Readonly<Record<ZaraState, string>> = {
-  BOOTING: "BOOTING", IDLE: "IDLE", LISTENING: "LISTENING", THINKING: "THINKING",
-  PLANNING: "PLANNING", SPEAKING: "SPEAKING", WAITING: "WAITING", INTERRUPTED: "INTERRUPTED",
-  QUIET: "QUIET", SLEEPING: "SLEEPING", EXECUTING: "EXECUTING", VERIFYING: "VERIFYING",
-  ERROR: "ERROR", SHUTTING_DOWN: "SHUTTING DOWN"
+  BOOTING: "Starting up", IDLE: "Idle", LISTENING: "Listening", THINKING: "Thinking",
+  PLANNING: "Planning", SPEAKING: "Talking", WAITING: "Waiting for you", INTERRUPTED: "Interrupted",
+  QUIET: "Quiet mode", SLEEPING: "Sleeping", EXECUTING: "Doing it", VERIFYING: "Checking",
+  ERROR: "Hit a snag", SHUTTING_DOWN: "Going to sleep"
 };
 
 /** Theme for an emotion — emotion leads, state color feeds the HUD dot. */

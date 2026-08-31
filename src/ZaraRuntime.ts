@@ -28,6 +28,7 @@ import { WebFallbackBridge } from "./agent/tools/WebFallbackBridge";
 import { ZaraNativeBridge, isNativeAvailable } from "./native/ZaraNativeBridge";
 import { NativeBridge, ToolContext } from "./agent/tools/ToolTypes";
 import { ConfirmationManager } from "./agent/confirmation/ConfirmationManager";
+import { ApprovalPolicy } from "./agent/confirmation/ApprovalPolicy";
 import { AgentOrchestrator } from "./agent/orchestrator/AgentOrchestrator";
 import { AntiSpamPolicy } from "./proactivity/policy/AntiSpam";
 import { ProactiveDecisionEngine } from "./proactivity/ProactiveDecisionEngine";
@@ -121,6 +122,9 @@ export class ZaraRuntime {
   // Agent
   readonly tools = new ToolRegistry();
   readonly confirmations: ConfirmationManager;
+  /** V2.1 §8-9: opt-in approval memory — identical actions don't re-confirm
+   * within a short window. Session-scoped; Android permissions untouched. */
+  readonly approvals: ApprovalPolicy;
   agent: AgentOrchestrator;
   private dialogueLog: Parameters<MemoryConsolidator["processSlice"]>[0] = [];
 
@@ -173,6 +177,10 @@ export class ZaraRuntime {
     // Device → typed native plugin; web preview/tests → honest fallback.
     this.native = opts.nativeBridge ?? (isNativeAvailable() ? new ZaraNativeBridge() : new WebFallbackBridge());
     this.confirmations = new ConfirmationManager(this.bus, this.diag);
+    this.approvals = new ApprovalPolicy({
+      ttlMs: 10 * 60 * 1000,
+      enabled: () => this.settings.current.rememberApprovals
+    });
 
     const toolCtx: ToolContext = {
       emitActionEvent: (name, payload) => this.bus.emit(name as "ACTION_COMPLETED", payload as never),
@@ -191,6 +199,7 @@ export class ZaraRuntime {
       provider: () => this.providers.active(),
       tools: this.tools,
       confirmations: this.confirmations,
+      approvals: this.approvals,
       context: this.context,
       bus: this.bus,
       diag: this.diag,

@@ -63,6 +63,10 @@ export interface ZaraSettings {
   animations: boolean;
   /** Wake phrase for manual activation (Android foreground). */
   wakePhrase: string;
+  /** V2.1 natural-action UX: remember recent approvals for the same action
+   * for a short window so ZARA doesn't re-confirm the identical thing.
+   * Opt-in, session-scoped, never bypasses Android permissions. */
+  rememberApprovals: boolean;
 }
 
 export const DEFAULT_SETTINGS: ZaraSettings = {
@@ -91,7 +95,8 @@ export const DEFAULT_SETTINGS: ZaraSettings = {
   weatherLocation: "",
   language: "auto",
   animations: true,
-  wakePhrase: "zara"
+  wakePhrase: "zara",
+  rememberApprovals: false
 };
 
 const SETTINGS_KEY = "zara.settings.v1";
