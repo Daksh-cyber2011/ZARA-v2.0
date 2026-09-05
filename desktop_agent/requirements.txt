@@ -1,0 +1,20 @@
+# MYRAA Desktop Control Agent — Python dependencies
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pydantic>=2.8.0
+
+# Desktop control (Windows)
+pyautogui>=0.9.54
+pyperclip>=1.9.0
+psutil>=6.0.0
+pywin32>=306; sys_platform == "win32"
+pycaw>=20240210; sys_platform == "win32"
+comtypes>=1.4.0; sys_platform == "win32"
+screen-brightness-control>=0.24.0
+mss>=9.0.0
+pillow>=10.0.0
+send2trash>=1.8.0
+
+# Optional: visible-text targeting OCR fallback
+pytesseract>=0.3.10
+uiautomation>=2.0.20; sys_platform == "win32"

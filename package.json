@@ -1,44 +1,82 @@
 {
-  "name": "zara",
-  "productName": "ZARA",
+  "name": "myraa",
+  "productName": "MYRAA",
+  "description": "MYRAA \u2014 a private 3D AI desktop companion powered by each user's own Gemini API key.",
+  "author": "MYRAA",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
-  "description": "ZARA V1.0 — persistent, proactive, memory-driven Android tablet AI companion",
+  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "cap:sync": "npm run build && npx cap sync android",
-    "cap:open": "npx cap open android",
-    "cap:add": "npx cap add android"
+    "dev": "tsx server/server.ts",
+    "build": "npm run build:ui && npm run build:server",
+    "build:server": "node scripts/build-server.mjs",
+    "build:ui": "vite build",
+    "start": "npm run dev",
+    "agent": "python -m uvicorn desktop_agent.main:app --host 127.0.0.1 --port 8765",
+    "electron": "electron .",
+    "test": "node --test tests/",
+    "test:runtime": "node --test tests/runtime.test.mjs",
+    "test:agent": "python -m pytest desktop_agent/tests -q"
   },
   "dependencies": {
-    "@capacitor/android": "^7.6.8",
-    "@capacitor/app": "^7.0.1",
-    "@capacitor/core": "^7.2.0",
-    "@capacitor/filesystem": "^7.0.1",
-    "@capacitor/preferences": "^7.0.1",
-    "@capacitor/status-bar": "^7.0.1",
-    "@google/genai": "^1.9.0",
-    "@pixiv/three-vrm": "^3.5.5",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "three": "^0.180.0"
+    "@google/genai": "^2.4.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.2.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
     "@types/three": "^0.180.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3",
-    "vitest": "^3.1.1"
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "lucide-react": "^0.546.0",
+    "mmd-parser": "^1.0.4",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "three": "^0.180.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.2.3"
   },
-  "allowScripts": {
-    "esbuild@0.25.12": true
+  "build": {
+    "appId": "com.myraa.desktop",
+    "productName": "MYRAA",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop_agent_dist",
+        "to": "agent"
+      },
+      {
+        "from": "assets",
+        "to": "app/assets"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "unicode": true
+    }
   }
 }

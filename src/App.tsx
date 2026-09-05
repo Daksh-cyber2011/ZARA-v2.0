@@ -1,663 +1,609 @@
 /**
- * ZARA V2.1 — Main application shell.
+ * MYRAA — application shell.
  *
- * One adaptive interface, two presentations:
+ * Layers (back to front):
+ *   theme orb → PMX character canvas → hologram particles → status chips →
+ *   subtitles → transcript → composer → voice controls → panels.
  *
- *  PHONE (portrait, narrow) — immersive single stage: ZARA fills the screen,
- *  a compact composer dock at the bottom, chat/memory/settings as a slide-over.
- *
- *  COMPANION (tablets ≥768px, desktop, landscape phones) — a persistent
- *  conversation column lives beside the stage, messenger-style, so the
- *  dialogue is ALWAYS visible on big screens instead of hidden in a drawer.
- *  Tabbed panel head replaces the floating rail.
- *
- * The layout switch is done in CSS (media queries) AND mirrored in JS
- * (useWideLayout) so React knows which content to render by default.
- *
- * The whole interface breathes with the REAL runtime state + emotion theme —
- * nothing is decorative.
+ * The voice lifecycle is a deterministic state machine:
+ *   disconnected → connecting → connected → listening ⇄ (talking)
+ * Any failure lands in "error" with a recoverable action; nothing deadlocks.
  */
-import { useEffect, useRef, useState, useCallback } from "react";
-import { zaraRuntime } from "./ZaraRuntime";
-import { ProceduralAvatarRenderer, type AvatarRenderer } from "./avatar/renderer/ProceduralAvatar";
-import { VrmAvatarRenderer, type CameraView } from "./avatar/renderer/VrmAvatarRenderer";
-import { speechEnvelope } from "./avatar/renderer/vrmMapping";
-import { LivingLayer } from "./avatar/stage/LivingLayer";
-import { themeFor, STATE_HUD_COLORS, STATE_LABELS } from "./avatar/stage/themes";
-import { buildAndroidTools } from "./agent/tools/AndroidTools";
-import Onboarding from "./ui/components/Onboarding";
-import SettingsPanel from "./ui/components/SettingsPanel";
-import MemoryPanel from "./ui/components/MemoryPanel";
-import DiagnosticsPanel from "./ui/components/DiagnosticsPanel";
-import { Icon } from "./ui/components/Icons";
-import { ZaraState } from "./core/state/states";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { CharacterView } from "./character/CharacterView";
+import { ApiKeyGate } from "./components/ApiKeyGate";
+import { Composer } from "./components/Composer";
+import { MemoryPanel } from "./components/MemoryPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { themeColors, themeOrbClass, type ThemeName } from "./lib/themes";
+import { useSettings } from "./lib/settings";
+import type { Memory } from "./lib/memoryTypes";
+import {
+  MyraaVoiceClient,
+  type ConnectionState,
+  type ToolCallInfo,
+  type TranscriptEntry,
+} from "./lib/voiceClient";
 
-interface ChatMsg {
-  who: "user" | "zara";
-  text: string;
-  tools?: { tool: string; outcome: string; status: string }[];
+type ActivityMode = "idle" | "listening" | "thinking" | "talking";
+
+interface StatusChip {
+  label: string;
+  tone: "cyan" | "emerald" | "amber" | "rose" | "slate";
 }
 
-type PanelId = "chat" | "memory" | "settings" | "diagnostics";
-
-/** Humanized fallback boot lines — real stage lines arrive from diagnostics. */
-const BOOT_STAGES = [
-  "Warming up…",
-  "Remembering what matters…",
-  "Tuning my voice…",
-  "Almost there…"
+// Playful core suggestions for the TOPICS flyout (functional equivalent of the
+// original's suggestion chips; RECONSTRUCTED — original list not observable).
+const TOPIC_SUGGESTIONS: string[] = [
+  "What have you been thinking about lately?",
+  "Tell me something new you learned today",
+  "I want to plan something for this week",
+  "Remind me what we talked about yesterday",
 ];
-
-const QUICK_ACTIONS: { label: string; hint: string }[] = [
-  { label: "Open YouTube", hint: "Open YouTube" },
-  { label: "Remind me", hint: "Remind me tomorrow at 7pm to study" },
-  { label: "Remember this", hint: "Remember that I'm building ZARA" },
-  { label: "Be quiet", hint: "Zara, be quiet" }
-];
-
-const VIEW_LABELS: Record<CameraView, string> = {
-  portrait: "Close-up",
-  front: "Front",
-  threeQuarter: "¾ view",
-  side: "Side",
-  back: "Back",
-  full: "Full body"
-};
-
-const PANEL_TITLES: Record<PanelId, string> = {
-  chat: "Chat",
-  memory: "Memory",
-  settings: "Settings",
-  diagnostics: "System"
-};
-
-/* Media queries that enable the companion split layout. MUST match CSS. */
-const WIDE_QUERY = "(min-width: 768px) and (min-height: 480px)";
-const WIDE_LANDSCAPE_QUERY = "(min-width: 640px) and (max-height: 479px) and (orientation: landscape)";
-
-/** Reactive viewport mode — true when the persistent chat column is shown. */
-function useWideLayout(): boolean {
-  const [wide, setWide] = useState(() => {
-    try {
-      return window.matchMedia(WIDE_QUERY).matches || window.matchMedia(WIDE_LANDSCAPE_QUERY).matches;
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    const mqs = [window.matchMedia(WIDE_QUERY), window.matchMedia(WIDE_LANDSCAPE_QUERY)];
-    const update = () => setWide(mqs[0].matches || mqs[1].matches);
-    update();
-    mqs.forEach(m => m.addEventListener("change", update));
-    return () => mqs.forEach(m => m.removeEventListener("change", update));
-  }, []);
-  return wide;
-}
 
 export default function App() {
-  const [booted, setBooted] = useState(false);
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
-  const [state, setState] = useState<ZaraState>("BOOTING");
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [confirmQ, setConfirmQ] = useState<{ callId: string; tool: string; summary: string } | null>(null);
-  const [panel, setPanel] = useState<PanelId | null>(null);
-  const [emotion, setEmotion] = useState("neutral");
-  const [perceptionLine, setPerceptionLine] = useState("");
-  const [avatarReady, setAvatarReady] = useState(false);
-  const [avatarError, setAvatarError] = useState("");
-  const [bootPhase, setBootPhase] = useState(0);
-  const [bootRatio, setBootRatio] = useState(0);
-  const [bootStageLine, setBootStageLine] = useState("");
-  const [eyeTracking, setEyeTracking] = useState(true);
-  const [viewLocked, setViewLocked] = useState(false);
-  const [cameraView, setCameraView] = useState<CameraView>("threeQuarter");
-  const [camOpen, setCamOpen] = useState(false);
-  const [nativeOnline, setNativeOnline] = useState<boolean | null>(null);
+  const { settings, update } = useSettings();
 
-  const wide = useWideLayout();
-  /* In companion mode the column is always mounted — chat is the default tab. */
-  const activePanel: PanelId | null = panel ?? (wide ? "chat" : null);
+  // --- Backend configuration -------------------------------------------------
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [showKeyGate, setShowKeyGate] = useState(false);
+  const [agentOnline, setAgentOnline] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const vrmCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const livingRef = useRef<HTMLCanvasElement | null>(null);
-  const avatarRef = useRef<AvatarRenderer | null>(null);
-  const proceduralRef = useRef<ProceduralAvatarRenderer | null>(null);
-  const vrmRef = useRef<VrmAvatarRenderer | null>(null);
-  const livingRef2 = useRef<LivingLayer | null>(null);
-  const streamEndRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  /* Composer never locks: typed messages queue naturally while ZARA thinks. */
-  const busyRef = useRef(false);
-  const queueRef = useRef<string[]>([]);
+  // --- Voice client -----------------------------------------------------------
+  const voiceRef = useRef<MyraaVoiceClient | null>(null);
+  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
+  const [statusLine, setStatusLine] = useState("disconnected");
+  const [activity, setActivity] = useState<ActivityMode>("idle");
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [subtitle, setSubtitle] = useState<string | null>(null);
+  const [outputAnalyser, setOutputAnalyser] = useState<AnalyserNode | null>(null);
+  const [inputAnalyser, setInputAnalyser] = useState<AnalyserNode | null>(null);
+  const [screenVisionState, setScreenVisionState] = useState<string>("OFF");
+  const [micVolume, setMicVolume] = useState(0);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
-  const theme = themeFor(emotion as never);
-  const lastZaraMsg = [...msgs].reverse().find(m => m.who === "zara");
+  // --- Panels -----------------------------------------------------------------
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [topicsOpen, setTopicsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memories, setMemories] = useState<Memory[]>([]);
 
-  /* ------------------------------ boot ---------------------------------- */
-  useEffect(() => {
-    let alive = true;
-    let initDone = false;
-    const failsafe = setTimeout(() => {
-      if (!initDone && alive) {
-        setBootStageLine("still starting — opening in degraded mode");
-        setBooted(true);
-      }
-    }, 15000);
-    const offBoot = zaraRuntime.diag.onRecord(r => {
-      if (r.category === "state" && r.event === "BOOT_STAGE" && !initDone) {
-        const d = r.detail as { stage?: string; status?: string };
-        if (d.stage) setBootStageLine(`${d.stage.toLowerCase().replace(/_/g, " ")} — ${d.status?.toLowerCase() ?? ""}`);
-      }
-    });
-    (async () => {
-      await zaraRuntime.init();
-      if (!alive) { clearTimeout(failsafe); return; }
-      initDone = true;
-      clearTimeout(failsafe);
-      const configured = await zaraRuntime.providers.configuredProviders();
-      if (!alive) return;
-      setNeedsOnboarding(configured.length === 0);
-      setBooted(true);
-      const restored = zaraRuntime.restoredConversation;
-      if (restored.length > 0) {
-        setMsgs(restored.map(m => ({ who: m.role === "user" ? "user" as const : "zara" as const, text: m.text })));
-      }
-      zaraRuntime.startProactiveLoop(60000);
+  // --- Screen share -----------------------------------------------------------
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [screenPaused, setScreenPaused] = useState(false);
 
-      const refresh = () => {
-        setState(zaraRuntime.sm.state);
-        setEmotion(zaraRuntime.emotions.emotion);
-        const c = zaraRuntime.confirmations.current;
-        setConfirmQ(c ? { callId: c.callId, tool: c.tool, summary: c.summary } : null);
-        const p = zaraRuntime.perception.describe();
-        setPerceptionLine(p.join(" · "));
-      };
-      zaraRuntime.onEvent = () => refresh();
-      zaraRuntime.sm.onTransition(() => {
-        avatarRef.current?.setState(zaraRuntime.sm.state);
-        refresh();
-      });
-      const offConfirmReq = zaraRuntime.bus.on("CONFIRMATION_REQUESTED", c => setConfirmQ({ ...c }));
-      const offConfirmRes = zaraRuntime.bus.on("CONFIRMATION_RESOLVED", () => setConfirmQ(null));
-      const offSpoke = zaraRuntime.bus.on("USER_SPOKE", t => {
-        setMsgs(m => [...m, { who: "user", text: t.text }]);
-      });
-      const offResumed = zaraRuntime.bus.on("SESSION_RESUMED", r => {
-        setMsgs(m => (m.length === 0 ? r.messages.map(msg => ({ who: msg.role === "user" ? "user" as const : "zara" as const, text: msg.text })) : m));
-      });
-      const offSpeakStart = zaraRuntime.bus.on("ZARA_STARTED_SPEAKING", u => {
-        if (u.source === "proactive") setMsgs(m => [...m, { who: "zara", text: "" }]);
-      });
-      refresh();
-      const onPageHide = () => zaraRuntime.shutdown();
-      window.addEventListener("pagehide", onPageHide);
-      return () => { offConfirmReq(); offConfirmRes(); offSpoke(); offSpeakStart(); offResumed(); offBoot(); window.removeEventListener("pagehide", onPageHide); };
-    })();
-    return () => { alive = false; clearTimeout(failsafe); offBoot(); };
-  }, []);
+  // Wake word (Web Speech API fallback listener)
+  const wakeRecognitionRef = useRef<any>(null);
 
-  /* --------------------------- avatar + stage ---------------------------- */
-  useEffect(() => {
-    if (!booted) return;
-    const fanout: AvatarRenderer = {
-      start: () => {},
-      stop: () => { proceduralRef.current?.stop(); vrmRef.current?.stop(); },
-      setState: s => { proceduralRef.current?.setState(s); vrmRef.current?.setState(s); },
-      setEnergy: e => { proceduralRef.current?.setEnergy(e); vrmRef.current?.setEnergy(e); },
-      onTap: cb => { proceduralRef.current?.onTap(cb); vrmRef.current?.onTap(cb); }
-    };
-    avatarRef.current = fanout;
+  const theme: ThemeName = settings.theme;
 
-    // Living layer — the holographic stage behind her.
-    if (livingRef.current) {
-      const living = new LivingLayer();
-      living.setEmotion(zaraRuntime.emotions.emotion);
-      living.start(livingRef.current);
-      livingRef2.current = living;
-    }
-
-    if (canvasRef.current) {
-      const renderer = new ProceduralAvatarRenderer(zaraRuntime.emotions);
-      renderer.start(canvasRef.current);
-      renderer.setState(zaraRuntime.sm.state);
-      proceduralRef.current = renderer;
-    }
-    if (vrmCanvasRef.current && zaraRuntime.settings.current.animations) {
-      const vrm = new VrmAvatarRenderer(zaraRuntime.emotions, {
-        onProgress: (phase, ratio) => {
-          setBootPhase(3);
-          setBootRatio(ratio);
-          setBootStageLine(phase);
-        },
-        onStatus: (status, detail) => {
-          if (status === "ready") {
-            setAvatarReady(true);
-            setBootRatio(1);
-            zaraRuntime.setAvatarStatus("vrm", "VRM female character ready");
-          } else if (status === "error") {
-            setAvatarError(detail ?? "VRM unavailable — simplified presence");
-            zaraRuntime.setAvatarStatus("procedural", detail ?? "VRM unavailable — simplified presence");
-          }
-        }
-      });
-      vrm.start(vrmCanvasRef.current);
-      vrm.setState(zaraRuntime.sm.state);
-      vrmRef.current = vrm;
-    } else {
-      // Animations disabled by the user (or no canvas): open immediately
-      // with the procedural core visual — never a forever-boot.
-      setAvatarError("Animations are off — using the simplified presence");
-    }
-    return () => {
-      proceduralRef.current?.stop();
-      vrmRef.current?.stop();
-      livingRef2.current?.stop();
-      proceduralRef.current = null;
-      vrmRef.current = null;
-      livingRef2.current = null;
-    };
-  }, [booted]);
-
-  /* ------------------------- energy + emotion feed ------------------------ */
-  useEffect(() => {
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = () => {
-      const t = (performance.now() - t0) / 1000;
-      const speaking = zaraRuntime.sm.state === "SPEAKING";
-      const jitter = speaking ? (Math.random() - 0.5) * 0.08 : 0;
-      const target = Math.max(0, Math.min(1, speechEnvelope(t, speaking) + jitter));
-      avatarRef.current?.setEnergy(target);
-      livingRef2.current?.setEnergy(target);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  /* emotion → living layer theme */
-  useEffect(() => { livingRef2.current?.setEmotion(emotion as never); }, [emotion]);
-
-  /* native bridge status probe (honest — shows real capability state) */
-  useEffect(() => {
-    if (!booted) return;
-    let on = false;
+  // ---------------------------------------------------------------------------
+  // Config + agent health
+  // ---------------------------------------------------------------------------
+  const refreshConfig = useCallback(async () => {
     try {
-      on = typeof (window as never as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform === "function"
-        && (window as never as { Capacitor: { isNativePlatform: () => boolean } }).Capacitor.isNativePlatform();
-    } catch { on = false; }
-    setNativeOnline(on);
-  }, [booted]);
+      const response = await fetch("/api/config");
+      const data = (await response.json()) as { hasApiKey?: boolean };
+      setHasApiKey(Boolean(data.hasApiKey));
+    } catch {
+      setHasApiKey(false);
+    }
+  }, []);
 
   useEffect(() => {
-    streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs, confirmQ, activePanel]);
+    void refreshConfig();
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch("/api/agent-health");
+        const data = (await response.json()) as { online?: boolean };
+        setAgentOnline(Boolean(data.online));
+      } catch {
+        setAgentOnline(false);
+      }
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [refreshConfig]);
 
-  /* ------------------------------ actions -------------------------------- */
+  // ---------------------------------------------------------------------------
+  // Memory sync
+  // ---------------------------------------------------------------------------
+  const refreshMemories = useCallback(async () => {
+    try {
+      const response = await fetch("/api/memories");
+      const data = (await response.json()) as Memory[];
+      setMemories(Array.isArray(data) ? data : []);
+    } catch {
+      /* keep last known list */
+    }
+  }, []);
 
-  /**
-   * Send a message. The composer is NEVER disabled — if ZARA is mid-turn,
-   * new messages queue and flow out as soon as she finishes. Typing while
-   * she thinks is normal messenger behaviour, not an error state.
-   */
-  const send = useCallback(async (raw?: string) => {
-    const text = (raw ?? input).trim();
-    if (!text) return;
-    setInput("");
-    if (busyRef.current) {
-      queueRef.current.push(text);
+  useEffect(() => {
+    void refreshMemories();
+  }, [refreshMemories]);
+
+  // ---------------------------------------------------------------------------
+  // Voice client wiring
+  // ---------------------------------------------------------------------------
+  const handleToolCall = useCallback(
+    (info: ToolCallInfo) => {
+      // Browser-side tools echo back to the live session.
+      const output: Record<string, unknown> =
+        info.name === "changeBackground"
+          ? { result: `Background changed to ${(info.args.color as string) || "default"}.` }
+          : { result: "Handled by client." };
+      if (info.name === "changeBackground") {
+        const color = String(info.args.color || "charcoal");
+        update({ theme: color as ThemeName });
+      }
+      voiceRef.current?.respondToTool(info.callId, info.name, { output });
+    },
+    [update],
+  );
+
+  useEffect(() => {
+    const client = new MyraaVoiceClient({
+      onState: (state) => {
+        setConnectionState(state);
+        setStatusLine(state);
+        if (state === "listening") setActivity("listening");
+        if (state === "disconnected") setActivity("idle");
+      },
+      onStatus: (status) => setStatusLine(status),
+      onTranscription: (entry) => {
+        setTranscript((current) => [...current.slice(-80), entry]);
+        if (entry.role === "model") {
+          setSubtitle(entry.text);
+        } else if (entry.text) {
+          setActivity("thinking");
+        }
+      },
+      onTurnComplete: () => {
+        setActivity("listening");
+      },
+      onInterrupted: () => {
+        setActivity("listening");
+      },
+      onToolCall: handleToolCall,
+      onMemorySync: (incoming) => {
+        setMemories((incoming as Memory[]) || []);
+      },
+      onError: (message, code) => {
+        setStatusLine(`error: ${message}`);
+        setConnectionState("error");
+        if (code === "INVALID_API_KEY") {
+          void fetch("/api/config")
+            .then((r) => r.json())
+            .then((data: { hasApiKey?: boolean }) => setHasApiKey(Boolean(data.hasApiKey)))
+            .catch(() => setHasApiKey(false));
+        }
+      },
+      onScreenVisionState: (state) => setScreenVisionState(state.toUpperCase()),
+      onOutputAnalyser: (analyser) => setOutputAnalyser(analyser),
+      onInputAnalyser: (analyser) => setInputAnalyser(analyser),
+    });
+    voiceRef.current = client;
+    return () => {
+      client.disconnect();
+      voiceRef.current = null;
+    };
+  }, [handleToolCall]);
+
+  // Mic volume meter for the orb halo + wake word hook
+  useEffect(() => {
+    if (!inputAnalyser) return;
+    const data = new Uint8Array(inputAnalyser.fftSize);
+    const timer = setInterval(() => {
+      inputAnalyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const value = (data[i] - 128) / 128;
+        sum += value * value;
+      }
+      setMicVolume(Math.min(1, Math.sqrt(sum / data.length) * 3));
+    }, 120);
+    return () => clearInterval(timer);
+  }, [inputAnalyser]);
+
+  // Web Speech API wake-word listener (browser-native fallback; the primary
+  // wake path is the server's streaming transcription).
+  useEffect(() => {
+    if (!settings.wakeWordEnabled) {
+      wakeRecognitionRef.current?.stop?.();
+      wakeRecognitionRef.current = null;
       return;
     }
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      const reply = await zaraRuntime.handleUserText(text);
-      setMsgs(m => {
-        const next = [...m];
-        if (reply) next.push({ who: "zara", text: reply });
-        return next;
-      });
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-      const next = queueRef.current.shift();
-      if (next) void send(next);
-    }
-  }, [input]);
-
-  const toggleVoice = useCallback(async () => {
-    if (listening) {
-      await zaraRuntime.stopVoiceSession();
-      setListening(false);
-    } else {
-      const ok = await zaraRuntime.startVoiceSession();
-      setListening(ok);
-      if (!ok) {
-        setMsgs(m => [...m, { who: "zara", text: "I couldn't start the voice session. Check that a provider key is configured in Settings and the microphone permission is granted." }]);
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    const phrase = settings.wakePhrase.trim().toLowerCase() || "hey myraa";
+    recognition.onresult = (event: any) => {
+      const result = event.results[event.results.length - 1];
+      const text = String(result?.[0]?.transcript || "").toLowerCase();
+      if (text.includes(phrase) && connectionState === "disconnected") {
+        void startVoice(true);
       }
+    };
+    try {
+      recognition.start();
+      wakeRecognitionRef.current = recognition;
+    } catch {
+      /* recognition unavailable — voice button still works */
     }
-  }, [listening]);
+    return () => {
+      try {
+        recognition.stop();
+      } catch {
+        /* already stopped */
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.wakeWordEnabled, settings.wakePhrase, connectionState]);
 
-  const interrupt = useCallback(() => {
-    zaraRuntime.interruption.interrupt("ui stop button");
+  // ---------------------------------------------------------------------------
+  // Voice lifecycle
+  // ---------------------------------------------------------------------------
+  const startVoice = useCallback(
+    async (force = false) => {
+      const client = voiceRef.current;
+      if (!client) return;
+      if (connectionState !== "disconnected" && !force) {
+        return;
+      }
+      if (!hasApiKey) {
+        setShowKeyGate(true);
+        return;
+      }
+      try {
+        await client.connect({ useMicrophone: true });
+      } catch (error) {
+        setStatusLine(error instanceof Error ? error.message : String(error));
+        setConnectionState("error");
+      }
+    },
+    [connectionState, hasApiKey],
+  );
+
+  const stopVoice = useCallback(() => {
+    voiceRef.current?.disconnect();
+    setTranscript([]);
+    setSubtitle(null);
+    setScreenSharing(false);
+    setScreenPaused(false);
+    setScreenVisionState("OFF");
   }, []);
 
-  const answerConfirm = useCallback(async (approved: boolean) => {
-    zaraRuntime.confirmations.resolve(approved, "ui");
-    if (approved) setBusy(true);
-  }, []);
-
-  const applyCamera = useCallback((view: CameraView) => {
-    vrmRef.current?.setView(view);
-    vrmRef.current?.setViewLocked(false);
-    setViewLocked(false);
-    setCameraView(view);
-    setCamOpen(false);
-  }, []);
-
-  const toggleEyeTracking = useCallback(() => {
-    const next = !eyeTracking;
-    vrmRef.current?.setEyeTracking(next);
-    setEyeTracking(next);
-  }, [eyeTracking]);
-
-  const toggleViewLock = useCallback(() => {
-    const next = !viewLocked;
-    vrmRef.current?.setViewLocked(next);
-    setViewLocked(next);
-  }, [viewLocked]);
-
-  const openPanel = useCallback((p: PanelId) => {
-    setPanel(cur => (cur === p && !wide ? null : p));
-  }, [wide]);
-
-  /* ------------------------------ boot gate ------------------------------ */
-
-  /* The stage canvases mount as soon as the runtime is up so the VRM model
-   * starts loading immediately; the boot overlay floats ON TOP until the
-   * character is ready, failed (→ procedural fallback), or timed out
-   * (never a forever-boot: belt-and-braces). No chicken-and-egg between
-   * the overlay and the canvas mount — that deadlock is what hid the model. */
-  const [stageTimedOut, setStageTimedOut] = useState(false);
+  // Subtitle expiry
   useEffect(() => {
-    if (booted && !avatarReady && !avatarError) {
-      const t = setTimeout(() => setStageTimedOut(true), 15000);
-      return () => clearTimeout(t);
+    if (!subtitle) return;
+    const timer = setTimeout(() => setSubtitle(null), 6000);
+    return () => clearTimeout(timer);
+  }, [subtitle]);
+
+  // Transcript autoscroll
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript]);
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+  const sendText = useCallback((text: string) => {
+    voiceRef.current?.sendText(text);
+    setActivity("thinking");
+  }, []);
+
+  const toggleScreenShare = useCallback(async () => {
+    const client = voiceRef.current;
+    if (!client) return;
+    if (screenSharing) {
+      client.stopScreenShare();
+      setScreenSharing(false);
+      setScreenPaused(false);
+      return;
     }
-  }, [booted, avatarReady, avatarError]);
-  const stageOpen = avatarReady || !!avatarError || stageTimedOut;
+    try {
+      await client.startScreenShare();
+      setScreenSharing(true);
+      setScreenPaused(false);
+    } catch (error) {
+      setStatusLine(error instanceof Error ? error.message : "Could not see your screen");
+    }
+  }, [screenSharing]);
 
-  if (!booted) {
-    return (
-      <div className="boot">
-        <div className="boot-inner">
-          <div className="boot-mark">
-            <div className="boot-core" />
-            <div className="boot-ring r1" />
-            <div className="boot-ring r2" />
-          </div>
-          <div className="boot-title">ZARA</div>
-          <div className="boot-sub">your AI companion</div>
-          <div className="boot-progress">
-            <div className="boot-bar"><div className="boot-fill" style={{ width: `${Math.round(bootRatio * 100)}%` }} /></div>
-            <div className="boot-meta">
-              <span>{bootStageLine || BOOT_STAGES[bootPhase] || "Warming up…"}</span>
-              <span>{Math.round(bootRatio * 100)}%</span>
-            </div>
-          </div>
-        </div>
-        <div className="boot-grid" />
-      </div>
+  const togglePauseShare = useCallback(() => {
+    const client = voiceRef.current;
+    if (!client || !screenSharing) return;
+    if (client.isScreenPaused) {
+      client.resumeScreenShare();
+      setScreenPaused(false);
+    } else {
+      client.pauseScreenShare();
+      setScreenPaused(true);
+    }
+  }, [screenSharing]);
+
+  // ---------------------------------------------------------------------------
+  // Derived UI state
+  // ---------------------------------------------------------------------------
+  const statusChips = useMemo<StatusChip[]>(() => {
+    const chips: StatusChip[] = [];
+    if (screenSharing) {
+      chips.push(
+        screenPaused
+          ? { label: "SCREEN VISION PAUSED", tone: "amber" }
+          : { label: "SCREEN VISION ACTIVE", tone: "cyan" },
+      );
+    } else if (screenVisionState === "ACTIVE") {
+      chips.push({ label: "SCREEN VISION MODE", tone: "cyan" });
+    }
+    if (transcript.length > 0) {
+      chips.push({ label: "MEM-SYNC STREAM ACTIVE", tone: "emerald" });
+    }
+    chips.push(
+      agentOnline
+        ? { label: "Agent Online", tone: "emerald" }
+        : { label: "Agent Offline", tone: "rose" },
     );
-  }
+    return chips;
+  }, [agentOnline, screenPaused, screenSharing, screenVisionState, transcript.length]);
 
-  /* ------------------------------ main render ---------------------------- */
+  const statusText = useMemo(() => {
+    if (connectionState === "listening") return "I am listening. Speak freely...";
+    if (connectionState === "connecting") return "Materializing presence links...";
+    if (connectionState === "error") return statusLine || "Something went wrong.";
+    if (connectionState === "connected") return "Holographic Live link active.";
+    if (!hasApiKey) return "Connect memory core to awaken my voice.";
+    return "Awake Myraa";
+  }, [connectionState, hasApiKey, statusLine]);
 
-  const hudColor = STATE_HUD_COLORS[state];
+  const toneClass = (tone: StatusChip["tone"]) => {
+    switch (tone) {
+      case "cyan":
+        return "border-cyan-400/60 bg-cyan-500/15 text-cyan-200";
+      case "emerald":
+        return "border-emerald-400/25 bg-emerald-400/10 text-emerald-300";
+      case "amber":
+        return "border-amber-400/60 bg-amber-500/15 text-amber-200";
+      case "rose":
+        return "border-rose-500/30 bg-rose-500/10 text-rose-400";
+      default:
+        return "border-white/10 text-slate-400";
+    }
+  };
+
+  const colors = themeColors(theme);
+  const connected = connectionState === "listening" || connectionState === "connected";
 
   return (
-    <div className={`app ${wide ? "wide" : ""}`} style={{ ["--z-primary" as string]: theme.primary, ["--z-secondary" as string]: theme.secondary }}>
-      {/* boot overlay — floats above the stage while the character loads */}
-      {!stageOpen && (
-        <div className="boot overlay">
-          <div className="boot-inner">
-            <div className="boot-mark">
-              <div className="boot-core" />
-              <div className="boot-ring r1" />
-              <div className="boot-ring r2" />
-            </div>
-            <div className="boot-title">ZARA</div>
-            <div className="boot-sub">your AI companion</div>
-            <div className="boot-progress">
-              <div className="boot-bar"><div className="boot-fill" style={{ width: `${Math.round(bootRatio * 100)}%` }} /></div>
-              <div className="boot-meta">
-                <span>{bootStageLine || BOOT_STAGES[bootPhase] || "Warming up…"}</span>
-                <span>{Math.round(bootRatio * 100)}%</span>
-              </div>
-            </div>
-            {avatarError && <div className="boot-fallback">Taking a moment — opening with the simplified look</div>}
-          </div>
-          <div className="boot-grid" />
+    <div className="relative h-full w-full overflow-hidden bg-[#0a0a0f] text-slate-200">
+      {/* Ambient theme orb */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+        <div
+          className={`w-[500px] h-[500px] rounded-full blur-[140px] opacity-25 bg-gradient-to-tr transition-all duration-1000 ${themeOrbClass(theme)}`}
+        />
+      </div>
+
+      {/* PMX character */}
+      <CharacterView
+        activity={activity}
+        outputAnalyser={outputAnalyser}
+        inputAnalyser={inputAnalyser}
+        controlsEnabled={connected}
+        reflectionStrength={1}
+      />
+
+      {/* Hologram particles canvas */}
+      <canvas
+        id="myraa-hologram-living-canvas"
+        className="absolute inset-0 w-full h-full pointer-events-none z-[15]"
+      />
+
+      {/* Top status bar — original layout: MYRAA wordmark left, TOPICS / RECALLS / SHARE SCREEN / SETTINGS right */}
+      <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-2 font-mono text-sm font-semibold tracking-[0.35em] text-white">
+            MYRAA
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{
+                background: connected ? "#34d399" : "#64748b",
+                boxShadow: connected ? "0 0 8px #34d399" : "none",
+              }}
+            />
+          </span>
+          {statusChips.map((chip) => (
+            <span key={chip.label} className={`myraa-chip ${toneClass(chip.tone)}`}>
+              {chip.label}
+            </span>
+          ))}
         </div>
-      )}
-
-      {needsOnboarding && <Onboarding onDone={() => {
-        void zaraRuntime.providers.configuredProviders().finally(() => setNeedsOnboarding(false));
-      }} />}
-
-      {/* ---------- stage ---------- */}
-      <div className="stage">
-        <div className="stage-orb" />
-        <canvas ref={livingRef} className="stage-living" />
-        <div className="avatar-stack">
-          <canvas ref={canvasRef} style={{ display: avatarError ? "block" : "none" }} />
-          <canvas ref={vrmCanvasRef} style={{ display: avatarError ? "none" : "block" }} />
-        </div>
-
-        {/* camera controls — one quiet button, expands when wanted */}
-        <div className={`cam-wrap ${camOpen ? "open" : ""}`}>
+        <div className="flex items-center gap-5">
           <button
-            className={`cam-fab ${camOpen ? "on" : ""}`}
-            title="Camera views"
-            onClick={() => setCamOpen(o => !o)}
+            onClick={() => setTopicsOpen((open) => !open)}
+            className="myraa-chip border-transparent bg-transparent px-0 hover:text-white transition text-slate-400"
+            title="Playful core suggestions"
           >
-            <Icon.camera />
+            TOPICS
           </button>
-          {camOpen && (
-            <div className="cam-pop">
-              <div className="cam-pop-title">Camera</div>
-              <div className="cam-grid">
-                {(["portrait", "front", "threeQuarter", "side", "back", "full"] as CameraView[]).map(v => (
-                  <button key={v} className={`cam-view ${cameraView === v ? "on" : ""}`} onClick={() => applyCamera(v)}>
-                    {VIEW_LABELS[v]}
-                  </button>
-                ))}
-              </div>
-              <div className="cam-pop-row">
-                <button className={`cam-chip ${eyeTracking ? "on" : ""}`} onClick={toggleEyeTracking}>
-                  Eye contact {eyeTracking ? "on" : "off"}
-                </button>
-                <button className={`cam-chip ${viewLocked ? "lock" : ""}`} onClick={toggleViewLock}>
-                  {viewLocked ? "View locked" : "Free view"}
-                </button>
-              </div>
-              <div className="cam-hint">Drag to rotate · pinch to zoom · double-tap to reset</div>
-            </div>
-          )}
-        </div>
-
-        {/* mood + awareness readout */}
-        <div className="stage-caption">
-          <span className="mood">{theme.label}</span>
-          <span className="sep">·</span>
-          <span className="perc">{perceptionLine || "settling in…"}</span>
+          <button
+            onClick={() => setMemoryOpen(true)}
+            className="myraa-chip border-transparent bg-transparent px-0 hover:text-white transition text-slate-400"
+            title="Recollections Database"
+          >
+            RECALLS
+          </button>
+          <button
+            onClick={() => void toggleScreenShare()}
+            disabled={!connected}
+            className="myraa-chip border-transparent bg-transparent px-0 hover:text-white transition text-slate-400 disabled:opacity-40"
+            title={screenSharing ? "Stop sharing your screen" : "Share Screen with Myraa"}
+          >
+            {screenSharing ? "STOP SHARE" : "SHARE SCREEN"}
+          </button>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="myraa-chip border-transparent bg-transparent px-0 hover:text-white transition text-slate-400"
+          >
+            SETTINGS
+          </button>
         </div>
       </div>
 
-      {/* ---------- top bar ---------- */}
-      <div className="hud">
-        <div className="hud-brand">
-          <span className="logo-dot" />
-          ZARA
-        </div>
-        <div className="state-chip" style={{ ["--hud" as string]: hudColor }}>
-          <span className="dot" />
-          {STATE_LABELS[state]}
-        </div>
-        {listening && <div className="state-chip live"><span className="dot" />Voice live</div>}
-        <div className="hud-chips">
-          <div className={`chip ${nativeOnline ? "ok" : "dim"}`}>
-            <span className="chip-dot" />{nativeOnline === null ? "Starting…" : nativeOnline ? "On device" : "Web preview"}
+      {/* Topics flyout — playful core suggestions (functional equivalent) */}
+      {topicsOpen && (
+        <div className="absolute right-5 top-16 z-30 w-72 rounded-2xl border border-white/10 bg-black/70 p-4 backdrop-blur-xl">
+          <p className="mb-3 text-[10px] font-mono uppercase tracking-[0.3em] text-slate-500">
+            Playful core suggestions
+          </p>
+          <div className="space-y-2">
+            {TOPIC_SUGGESTIONS.map((topic) => (
+              <button
+                key={topic}
+                onClick={() => {
+                  setTopicsOpen(false);
+                  window.dispatchEvent(new CustomEvent("myraa:prefill", { detail: topic }));
+                }}
+                className="block w-full rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-left text-xs text-slate-300 transition hover:border-white/20 hover:text-white"
+              >
+                {topic}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="hud-spacer" />
-        {zaraRuntime.isQuiet ? (
-          <button className="hud-btn active" title="Exit quiet mode" onClick={() => zaraRuntime.exitQuietMode()}><Icon.bellOff /></button>
-        ) : (
-          <button className="hud-btn" title="Quiet mode (no proactive speech)" onClick={() => zaraRuntime.enterQuietMode()}><Icon.bellOff /></button>
-        )}
+      )}
+
+      {/* Transmission status */}
+      {connectionState === "connecting" && (
+        <div className="absolute left-1/2 top-20 z-20 -translate-x-1/2">
+          <span className="myraa-chip border-cyan-400/60 bg-cyan-500/15 text-cyan-200 animate-pulse">
+            {statusLine === "connecting_gemini" ? "LINKING GEMINI LIVE" : "MATERIALIZING PRESENCE LINKS"}
+          </span>
+        </div>
+      )}
+
+      {/* Center subtitles */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-36 z-20 flex justify-center px-6">
+        <div className="min-h-[6rem] max-w-3xl text-center">
+          <AnimatePresence mode="wait">
+            {subtitle ? (
+              <motion.p
+                key={subtitle.slice(0, 48)}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.35 }}
+                className="cinematic-subtitles text-balance text-lg leading-relaxed text-white/95"
+              >
+                {subtitle}
+              </motion.p>
+            ) : (
+              <motion.p
+                key="status"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-xs font-mono uppercase tracking-[0.3em] text-slate-500"
+              >
+                {settings.animations ? statusText : ""}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Transcript rail */}
+      {transcript.length > 0 && (
+        <div className="myraa-scroll absolute bottom-40 left-6 z-20 max-h-[38vh] w-[330px] max-w-[80vw] space-y-2 overflow-y-auto rounded-2xl border border-white/5 bg-black/35 p-4 backdrop-blur-md">
+          {transcript.slice(-24).map((entry, index) => (
+            <div key={`${entry.at}-${index}`} className="space-y-0.5">
+              <p
+                className={`text-[9px] font-mono uppercase tracking-widest ${
+                  entry.role === "user" ? "text-cyan-300/80" : "text-rose-300/80"
+                }`}
+              >
+                {entry.role === "user" ? "You" : "MYRAA"}
+              </p>
+              <p className="text-xs leading-relaxed text-slate-300">{entry.text}</p>
+            </div>
+          ))}
+          <div ref={transcriptEndRef} />
+        </div>
+      )}
+
+      {/* Bottom controls — original layout: composer, then a single circular power button */}
+      <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-3 p-5">
+        <Composer
+          disabled={!connected}
+          onSend={sendText}
+          onUserSpeechStarted={() => voiceRef.current?.sendConversationEvent("user_started_speaking")}
+        />
+        {/* Awake / sleep power button */}
         <button
-          className={`hud-btn ${state === "SLEEPING" ? "active" : ""}`}
-          title={state === "SLEEPING" ? "Wake ZARA" : "Sleep (low activity)"}
-          onClick={() => (state === "SLEEPING" ? zaraRuntime.wake() : zaraRuntime.enterSleep())}
+          onClick={() => (connected ? stopVoice() : void startVoice())}
+          aria-label={connected ? "Terminate Stream" : "Awake Myraa"}
+          title={connected ? "Terminate Stream" : "Awake Myraa"}
+          className={`relative mt-1 flex h-16 w-16 items-center justify-center rounded-full border backdrop-blur-md transition ${
+            connected
+              ? "border-rose-400/60 bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
+              : "border-white/15 bg-white/[0.06] text-slate-300 hover:bg-white/[0.12]"
+          }`}
         >
-          <Icon.moon />
-        </button>
-      </div>
-
-      {/* ---------- latest message toast (chat not on screen) ---------- */}
-      {activePanel !== "chat" && lastZaraMsg?.text && (
-        <div className="toast" onClick={() => setPanel("chat")}>
-          <span className="toast-who">ZARA</span>
-          <span className="toast-text">{lastZaraMsg.text}</span>
-        </div>
-      )}
-
-      {/* ---------- composer dock (bottom of stage on phone / bottom of chat column on companion) ---------- */}
-      <div className="dock">
-        {confirmQ && (
-          <div className="confirm-card">
-            <div className="q">{confirmQ.summary}</div>
-            <div className="row">
-              <button className="yes" onClick={() => answerConfirm(true)}>Yes, go ahead</button>
-              <button className="no" onClick={() => answerConfirm(false)}>No</button>
-            </div>
-          </div>
-        )}
-        <div className="composer">
-          <button
-            className={`mic-orb ${listening ? "listening" : ""} ${state === "LISTENING" ? "hot" : ""}`}
-            title={listening ? "End voice session" : "Start live voice session"}
-            onClick={toggleVoice}
-          >
-            <span className="orb-ring" />
-            <Icon.mic />
-          </button>
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && send()}
-            placeholder={zaraRuntime.isQuiet ? "Quiet mode — ZARA won't speak proactively" : "Message ZARA…"}
+          <span
+            className="absolute inset-0 rounded-full"
+            style={{
+              boxShadow: connected
+                ? `0 0 ${18 + micVolume * 30}px rgba(251,113,133,0.45)`
+                : "0 0 22px rgba(148,163,184,0.12)",
+            }}
           />
-          {state === "SPEAKING" ? (
-            <button className="stop-btn" onClick={interrupt}>STOP</button>
-          ) : (
-            <button className="send-btn" onClick={() => send()} disabled={!input.trim()}>
-              <Icon.send />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ---------- conversation column (slide-over on phone · persistent on companion) ---------- */}
-      <aside className={`panel ${activePanel ? "open" : ""}`}>
-        {activePanel && (
-          <>
-            {/* phone head: title + close / companion head: tabs */}
-            <div className="panel-head">
-              <span className="panel-title">{PANEL_TITLES[activePanel]}</span>
-              <div className="panel-tabs">
-                <button className={`tab ${activePanel === "chat" ? "on" : ""}`} onClick={() => setPanel("chat")}>
-                  <Icon.send /><span>Chat</span>
-                </button>
-                <button className={`tab ${activePanel === "memory" ? "on" : ""}`} onClick={() => setPanel("memory")}>
-                  <Icon.brain /><span>Memory</span>
-                </button>
-                <button className={`tab ${activePanel === "settings" ? "on" : ""}`} onClick={() => setPanel("settings")}>
-                  <Icon.settings /><span>Settings</span>
-                </button>
-                <button className={`tab ${activePanel === "diagnostics" ? "on" : ""}`} onClick={() => setPanel("diagnostics")}>
-                  <Icon.activity /><span>System</span>
-                </button>
-              </div>
-              <button className="panel-close" onClick={() => setPanel(null)}><Icon.x /></button>
-            </div>
-            <div className="panel-body">
-              {activePanel === "chat" && (
-                <>
-                  {msgs.length === 0 && (
-                    <div className="empty-state">
-                      <div className="empty-title">Say hi to ZARA</div>
-                      <div className="empty-sub">Type below, tap the mic for live voice, or try one of these.</div>
-                      <div className="quick-grid">
-                        {QUICK_ACTIONS.map(qa => (
-                          <button key={qa.label} className="quick-chip" onClick={() => send(qa.hint)}>
-                            {qa.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {msgs.map((m, i) => (
-                    <div className={`msg ${m.who}`} key={i}>
-                      <div className="who">{m.who === "user" ? "You" : "ZARA"}</div>
-                      <div className="bubble">{m.text}</div>
-                    </div>
-                  ))}
-                  {busy && (
-                    <div className="msg zara">
-                      <div className="who">ZARA</div>
-                      <div className="bubble thinking">
-                        <span /><span /><span />
-                      </div>
-                    </div>
-                  )}
-                  <div ref={streamEndRef} />
-                </>
-              )}
-              {activePanel === "memory" && <MemoryPanel />}
-              {activePanel === "settings" && <SettingsPanel />}
-              {activePanel === "diagnostics" && <DiagnosticsPanel />}
-            </div>
-          </>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="h-6 w-6"
+          >
+            <path d="M12 2v10" />
+            <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+          </svg>
+        </button>
+        {!connected && !hasApiKey && (
+          <p className="text-[11px] text-slate-500">Microphone required for holographic Live link.</p>
         )}
-      </aside>
-
-      {panel && !wide && <div className="panel-scrim" onClick={() => setPanel(null)} />}
-
-      {/* ---------- panel launcher rail (phone only — companion uses tabs) ---------- */}
-      <div className="rail">
-        <button className={`rail-btn ${activePanel === "chat" ? "on" : ""}`} title="Chat" onClick={() => openPanel("chat")}>
-          <Icon.send /><span>Chat</span>
-        </button>
-        <button className={`rail-btn ${activePanel === "memory" ? "on" : ""}`} title="Memory" onClick={() => openPanel("memory")}>
-          <Icon.brain /><span>Memory</span>
-        </button>
-        <button className={`rail-btn ${activePanel === "settings" ? "on" : ""}`} title="Settings" onClick={() => openPanel("settings")}>
-          <Icon.settings /><span>Settings</span>
-        </button>
-        <button className={`rail-btn ${activePanel === "diagnostics" ? "on" : ""}`} title="System" onClick={() => openPanel("diagnostics")}>
-          <Icon.activity /><span>System</span>
-        </button>
       </div>
+
+      {/* Panels */}
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        update={update}
+        hasApiKey={Boolean(hasApiKey)}
+        onReplaceKey={() => setShowKeyGate(true)}
+      />
+      <MemoryPanel
+        open={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+        memories={memories}
+        onMemoriesChanged={() => void refreshMemories()}
+      />
+
+      {/* API key gate */}
+      {showKeyGate && (
+        <ApiKeyGate
+          onSaved={() => {
+            setShowKeyGate(false);
+            void refreshConfig();
+          }}
+        />
+      )}
+      {hasApiKey === false && !showKeyGate && <ApiKeyGate onSaved={() => void refreshConfig()} />}
     </div>
   );
 }
-
-// Tool risk reference for the settings/diagnostics display.
-export const TOOL_RISK_TABLE = buildAndroidTools().map(t => ({ name: t.name, risk: t.risk }));

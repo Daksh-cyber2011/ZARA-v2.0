@@ -1,23 +1,7 @@
-# dependencies
 node_modules/
-
-# build output
 dist/
-android/app/build/
-android/.gradle/
-android/build/
-android/capacitor-cordova-android-plugins/build/
-android/local.properties
-*.apk
-*.aab
-
-# secrets & signing (§38/§43 — NEVER commit)
+release/
 .env
-.env.local
-android/zara-release.keystore
-android/keystore.properties
-*.keystore
-
-# editor / OS
-.DS_Store
 *.log
+__pycache__/
+desktop_agent_dist/

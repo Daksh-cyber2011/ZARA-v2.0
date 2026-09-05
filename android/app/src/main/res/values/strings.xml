@@ -1,9 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">ZARA</string>
-    <string name="title_activity_main">ZARA</string>
-    <string name="package_name">com.zara.companion</string>
-    <string name="custom_url_scheme">com.zara.companion</string>
-    <string name="zara_accessibility_label">ZARA Screen Awareness</string>
-    <string name="zara_accessibility_description">Lets ZARA notice which app you are using and the title of the current screen, so she can be contextually aware. ZARA reads only app names and window titles — never screen contents, never screenshots, never passwords. You can turn this off at any time in Android Settings or inside ZARA.</string>
-</resources>
